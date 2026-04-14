@@ -1,0 +1,88 @@
+HELP.md
+
+### Build ###
+target/
+!**/src/main/**/target/
+!**/src/test/**/target/
+dependency-reduced-pom.xml
+
+### Maven Wrapper ###
+.mvn/wrapper/maven-wrapper.jar
+
+### Logs ###
+*.log
+logs/
+
+### Environment & Secrets ###
+.env
+.env.*
+*.env
+
+# Uncomment if you store secrets locally
+# application.properties
+# application.yml
+# application-*.properties
+# application-*.yml
+
+### Database Files ###
+*.db
+*.sqlite
+*.h2.db
+
+### OS Files ###
+.DS_Store
+Thumbs.db
+desktop.ini
+
+### Temp Files ###
+*.tmp
+*.temp
+*.swp
+*.swo
+
+### Security Files ###
+*.jks
+*.p12
+*.key
+
+### Test & Coverage ###
+test-output/
+coverage/
+*.exec
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### VS Code ###
+.vscode/
+
+### Gradle ###
+.gradle/
+
+### Misc ###
+*.bak
+*.backup
+*.old
