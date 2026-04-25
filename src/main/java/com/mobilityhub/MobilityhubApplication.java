@@ -11,5 +11,9 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 public class MobilityhubApplication {
     public static void main(String[] args) {
         SpringApplication.run(MobilityhubApplication.class, args);
+        System.out.println("=========================================");
+        System.out.println("MobilityHub Application Started Successfully!");
+        System.out.println("Server running on: http://localhost:8080");
+        System.out.println("=========================================");
     }
 }
