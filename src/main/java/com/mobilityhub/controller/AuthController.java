@@ -27,8 +27,27 @@ public class AuthController {
     private final JwtUtils jwtUtils;
     private final RefreshTokenService refreshTokenService;
 
+//    @PostMapping("/signup")
+//    public ResponseEntity<?> registerUser(@Valid @RequestBody SignupRequest signupRequest) {
+//        try {
+//            User user = authService.registerUser(signupRequest);
+//            return ResponseEntity.ok(new MessageResponse(
+//                    "User registered successfully! Please check your email for verification code.",
+//                    true,
+//                    user.getEmail()));
+//        } catch (RuntimeException e) {
+//            return ResponseEntity.badRequest().body(new MessageResponse(e.getMessage(), false, null));
+//        }
+//    }
+
     @PostMapping("/signup")
     public ResponseEntity<?> registerUser(@Valid @RequestBody SignupRequest signupRequest) {
+        System.out.println("=== SIGNUP REQUEST RECEIVED ===");
+        System.out.println("Username: " + signupRequest.getUsername());
+        System.out.println("Email: " + signupRequest.getEmail());
+        System.out.println("Full Name: " + signupRequest.getFullName());
+        System.out.println("Password length: " + signupRequest.getPassword().length());
+
         try {
             User user = authService.registerUser(signupRequest);
             return ResponseEntity.ok(new MessageResponse(
@@ -36,6 +55,8 @@ public class AuthController {
                     true,
                     user.getEmail()));
         } catch (RuntimeException e) {
+            System.out.println("ERROR: " + e.getMessage());
+            e.printStackTrace(); // This will show the full stack trace
             return ResponseEntity.badRequest().body(new MessageResponse(e.getMessage(), false, null));
         }
     }
