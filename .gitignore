@@ -19,6 +19,7 @@ logs/
 *.env
 
 # Uncomment if you store secrets locally
+**/application.properties
 application.properties
 # application.yml
 # application-*.properties
