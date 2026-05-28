@@ -38,6 +38,25 @@ public class User implements UserDetails {
     @Column(nullable = false)
     private String fullName;
 
+    // Google OAuth Fields
+    @Column(name = "first_name")
+    private String firstName;
+
+    @Column(name = "last_name")
+    private String lastName;
+
+    @Column(name = "provider")
+    private String provider;
+
+    @Column(name = "provider_id")
+    private String providerId;
+
+    @Column(name = "avatar_url")
+    private String avatarUrl;
+
+    @Column(name = "is_oauth_user")
+    private boolean isOAuthUser = false;
+
     @Enumerated(EnumType.STRING)
     private Role role;
 
@@ -52,6 +71,13 @@ public class User implements UserDetails {
 
     @Column(name = "verification_code_expiry")
     private LocalDateTime verificationCodeExpiry;
+
+    // ✅ ADD THESE FIELDS FOR PASSWORD RESET
+    @Column(name = "reset_password_otp")
+    private String resetPasswordOtp;
+
+    @Column(name = "reset_password_otp_expiry")
+    private LocalDateTime resetPasswordOtpExpiry;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;

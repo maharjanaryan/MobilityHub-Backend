@@ -5,6 +5,7 @@ import com.mobilityhub.dto.request.*;
 import com.mobilityhub.dto.response.JwtResponse;
 import com.mobilityhub.dto.response.MessageResponse;
 import com.mobilityhub.model.RefreshToken;
+import com.mobilityhub.model.Role;
 import com.mobilityhub.model.User;
 import com.mobilityhub.security.jwt.JwtUtils;
 import com.mobilityhub.security.services.UserDetailsImpl;
@@ -12,11 +13,13 @@ import com.mobilityhub.service.AuthService;
 import com.mobilityhub.service.RefreshTokenService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
+@Slf4j
 @CrossOrigin(origins = "*", maxAge = 3600)
 @RestController
 @RequestMapping("/api/auth")
@@ -29,11 +32,10 @@ public class AuthController {
 
     @PostMapping("/signup")
     public ResponseEntity<?> registerUser(@Valid @RequestBody SignupRequest signupRequest) {
-        System.out.println("=== SIGNUP REQUEST RECEIVED ===");
-        System.out.println("Username: " + signupRequest.getUsername());
-        System.out.println("Email: " + signupRequest.getEmail());
-        System.out.println("Full Name: " + signupRequest.getFullName());
-        System.out.println("Password length: " + signupRequest.getPassword().length());
+        log.info("=== SIGNUP REQUEST RECEIVED ===");
+        log.info("Username: {}", signupRequest.getUsername());
+        log.info("Email: {}", signupRequest.getEmail());
+        log.info("Full Name: {}", signupRequest.getFullName());
 
         try {
             User user = authService.registerUser(signupRequest);
@@ -42,8 +44,7 @@ public class AuthController {
                     true,
                     user.getEmail()));
         } catch (RuntimeException e) {
-            System.out.println("ERROR: " + e.getMessage());
-            e.printStackTrace(); // This will show the full stack trace
+            log.error("Signup error: {}", e.getMessage());
             return ResponseEntity.badRequest().body(new MessageResponse(e.getMessage(), false, null));
         }
     }
@@ -57,6 +58,7 @@ public class AuthController {
                     true,
                     user));
         } catch (RuntimeException e) {
+            log.error("Email verification error: {}", e.getMessage());
             return ResponseEntity.badRequest().body(new MessageResponse(e.getMessage(), false, null));
         }
     }
@@ -70,6 +72,7 @@ public class AuthController {
                     true,
                     null));
         } catch (RuntimeException e) {
+            log.error("Resend verification error: {}", e.getMessage());
             return ResponseEntity.badRequest().body(new MessageResponse(e.getMessage(), false, null));
         }
     }
@@ -77,25 +80,42 @@ public class AuthController {
     @PostMapping("/signin")
     public ResponseEntity<?> authenticateUser(@Valid @RequestBody LoginRequest loginRequest) {
         try {
-            User user = authService.findByUsername(loginRequest.getUsername())
-                    .orElseThrow(() -> new RuntimeException("User not found"));
+            log.info("=== LOGIN REQUEST RECEIVED ===");
+            log.info("Email: {}", loginRequest.getEmail());
 
-            if (!user.isEmailVerified()) {
+            // Find user by email
+            User user = authService.findByEmail(loginRequest.getEmail())
+                    .orElseThrow(() -> new RuntimeException("User not found with email: " + loginRequest.getEmail()));
+
+            log.info("User found: {} (Username: {}, Role: {}, Email Verified: {})",
+                    user.getEmail(), user.getUsername(), user.getRole(), user.isEmailVerified());
+
+            // CRITICAL: Skip email verification for ADMIN users
+            // Admin can login without email verification
+            if (!user.isEmailVerified() && user.getRole() != Role.ADMIN) {
+                log.warn("Login blocked: User {} has not verified email", user.getEmail());
                 return ResponseEntity.status(403).body(new MessageResponse(
                         "Please verify your email before logging in!",
                         false,
                         null));
             }
 
-            Authentication authentication = authService.authenticateUser(loginRequest);
+            // Authenticate user with email and password
+            Authentication authentication = authService.authenticateUser(loginRequest.getEmail(), loginRequest.getPassword());
 
+            // Generate tokens
             String jwt = jwtUtils.generateJwtToken(authentication);
-            String refreshToken = jwtUtils.generateRefreshToken(loginRequest.getUsername());
+            String refreshToken = jwtUtils.generateRefreshToken(user.getUsername());
 
             UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
-
             RefreshToken refreshTokenEntity = refreshTokenService.createRefreshToken(userDetails.getId());
 
+            // Get role name (remove "ROLE_" prefix if present)
+            String roleName = user.getRole().name();
+
+            log.info("Login successful: {} (Role: {})", user.getEmail(), roleName);
+
+            // Return response WITH ROLE for frontend redirection
             return ResponseEntity.ok(JwtResponse.builder()
                     .accessToken(jwt)
                     .refreshToken(refreshTokenEntity.getToken())
@@ -104,11 +124,12 @@ public class AuthController {
                     .username(userDetails.getUsername())
                     .email(userDetails.getEmail())
                     .fullName(userDetails.getFullName())
-                    .role(userDetails.getAuthorities().iterator().next().getAuthority())
+                    .role(roleName)  // IMPORTANT: Send role to frontend
                     .expiresIn(86400000L)
                     .build());
 
         } catch (RuntimeException e) {
+            log.error("Login error: {}", e.getMessage());
             return ResponseEntity.badRequest().body(new MessageResponse(e.getMessage(), false, null));
         }
     }
@@ -122,6 +143,7 @@ public class AuthController {
                 .map(RefreshToken::getUser)
                 .map(user -> {
                     String token = jwtUtils.generateTokenFromUsername(user.getUsername(), 86400000);
+                    log.info("Token refreshed for user: {}", user.getUsername());
                     return ResponseEntity.ok(JwtResponse.builder()
                             .accessToken(token)
                             .refreshToken(requestRefreshToken)
@@ -131,6 +153,7 @@ public class AuthController {
                             .email(user.getEmail())
                             .fullName(user.getFullName())
                             .role(user.getRole().name())
+                            .expiresIn(86400000L)
                             .build());
                 })
                 .orElseThrow(() -> new RuntimeException("Refresh token is not in database!"));
@@ -139,9 +162,11 @@ public class AuthController {
     @PostMapping("/signout")
     public ResponseEntity<?> logoutUser() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
-
-        refreshTokenService.deleteByUserId(userDetails.getId());
+        if (authentication != null) {
+            UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
+            refreshTokenService.deleteByUserId(userDetails.getId());
+            log.info("User logged out: {}", userDetails.getUsername());
+        }
         return ResponseEntity.ok(new MessageResponse("Logout successful!", true, null));
     }
 
@@ -152,6 +177,7 @@ public class AuthController {
         }
 
         UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
+        log.info("Current user retrieved: {}", userDetails.getUsername());
         return ResponseEntity.ok(userDetails);
     }
 }
