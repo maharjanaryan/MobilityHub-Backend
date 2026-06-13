@@ -1,4 +1,3 @@
-// service/AdminKycService.java
 package com.mobilityhub.service;
 
 import com.mobilityhub.dto.response.AdminKycResponseDto;
@@ -17,6 +16,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -27,7 +27,88 @@ public class AdminKycService {
     private final OwnerKycRepository ownerKycRepository;
     private final UserRepository userRepository;
     private final KycEmailService kycEmailService;
-    private final NotificationService notificationService;  // Add this
+    private final NotificationService notificationService;
+
+    /**
+     * GET ALL KYC - Both verified and pending, both renter and owner
+     */
+    public List<AdminKycResponseDto> getAllKyc() {
+        log.info("Fetching all KYC records (both renter and owner, all statuses)");
+        List<AdminKycResponseDto> allKyc = new ArrayList<>();
+
+        // Get all renter KYC records
+        List<RenterKyc> allRenterKyc = renterKycRepository.findAll();
+        for (RenterKyc kyc : allRenterKyc) {
+            allKyc.add(mapToAdminResponse(kyc.getUser(), "RENTER", kyc));
+        }
+
+        // Get all owner KYC records
+        List<OwnerKyc> allOwnerKyc = ownerKycRepository.findAll();
+        for (OwnerKyc kyc : allOwnerKyc) {
+            allKyc.add(mapToAdminResponse(kyc.getUser(), "OWNER", kyc));
+        }
+
+        // Sort by submitted date (newest first)
+        allKyc.sort((a, b) -> {
+            if (a.getSubmittedAt() == null) return 1;
+            if (b.getSubmittedAt() == null) return -1;
+            return b.getSubmittedAt().compareTo(a.getSubmittedAt());
+        });
+
+        log.info("Total KYC records found: {}", allKyc.size());
+        return allKyc;
+    }
+
+    /**
+     * Get KYC by status (PENDING, VERIFIED, REJECTED, SUBMITTED)
+     */
+    public List<AdminKycResponseDto> getKycByStatus(String status) {
+        log.info("Fetching KYC records with status: {}", status);
+        List<AdminKycResponseDto> filteredKyc = new ArrayList<>();
+
+        // Convert status to enum for renter
+        RenterKyc.KycStatus renterStatus = null;
+        OwnerKyc.KycStatus ownerStatus = null;
+
+        try {
+            // Map status string to appropriate enum
+            switch (status.toUpperCase()) {
+                case "PENDING":
+                case "SUBMITTED":
+                    renterStatus = RenterKyc.KycStatus.SUBMITTED;
+                    ownerStatus = OwnerKyc.KycStatus.SUBMITTED;
+                    break;
+                case "VERIFIED":
+                case "APPROVED":
+                    renterStatus = RenterKyc.KycStatus.VERIFIED;
+                    ownerStatus = OwnerKyc.KycStatus.VERIFIED;
+                    break;
+                case "REJECTED":
+                    renterStatus = RenterKyc.KycStatus.REJECTED;
+                    ownerStatus = OwnerKyc.KycStatus.REJECTED;
+                    break;
+                default:
+                    return getAllKyc();
+            }
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid status filter: {}, returning all KYC", status);
+            return getAllKyc();
+        }
+
+        // Get renter KYC with matching status
+        List<RenterKyc> renterKycList = renterKycRepository.findByKycStatus(renterStatus);
+        for (RenterKyc kyc : renterKycList) {
+            filteredKyc.add(mapToAdminResponse(kyc.getUser(), "RENTER", kyc));
+        }
+
+        // Get owner KYC with matching status
+        List<OwnerKyc> ownerKycList = ownerKycRepository.findByKycStatus(ownerStatus);
+        for (OwnerKyc kyc : ownerKycList) {
+            filteredKyc.add(mapToAdminResponse(kyc.getUser(), "OWNER", kyc));
+        }
+
+        return filteredKyc;
+    }
 
     /**
      * Get all pending renter KYC requests
@@ -66,18 +147,41 @@ public class AdminKycService {
     }
 
     /**
+     * Get Renter KYC details by ID (direct lookup without ambiguity)
+     */
+    public KycDetailsResponseDto getRenterKycDetails(Long kycId) {
+        log.info("Fetching RENTER KYC details for ID: {}", kycId);
+        RenterKyc renterKyc = renterKycRepository.findById(kycId)
+                .orElseThrow(() -> new RuntimeException("Renter KYC not found with ID: " + kycId));
+        return mapToKycDetailsResponse(renterKyc);
+    }
+
+    /**
+     * Get Owner KYC details by ID (direct lookup without ambiguity)
+     */
+    public KycDetailsResponseDto getOwnerKycDetails(Long kycId) {
+        log.info("Fetching OWNER KYC details for ID: {}", kycId);
+        OwnerKyc ownerKyc = ownerKycRepository.findById(kycId)
+                .orElseThrow(() -> new RuntimeException("Owner KYC not found with ID: " + kycId));
+        return mapToKycDetailsResponse(ownerKyc);
+    }
+
+    /**
      * Get KYC details by ID - Returns KycDetailsResponseDto
+     * Note: This method tries renter first, then owner - may return wrong type if both have same ID
      */
     public KycDetailsResponseDto getKycDetails(Long kycId) {
         // Try to find in renter KYC first
         RenterKyc renterKyc = renterKycRepository.findById(kycId).orElse(null);
         if (renterKyc != null) {
+            log.info("Found RENTER KYC with ID: {}", kycId);
             return mapToKycDetailsResponse(renterKyc);
         }
 
         // Try owner KYC
         OwnerKyc ownerKyc = ownerKycRepository.findById(kycId).orElse(null);
         if (ownerKyc != null) {
+            log.info("Found OWNER KYC with ID: {}", kycId);
             return mapToKycDetailsResponse(ownerKyc);
         }
 
@@ -130,7 +234,7 @@ public class AdminKycService {
                 // Send approval email using KycEmailService
                 kycEmailService.sendKycApprovalEmail(user.getEmail(), user.getFullName(), "RENTER");
 
-                // ✅ NOTIFICATION: To user - KYC Approved
+                // NOTIFICATION: To user - KYC Approved
                 notificationService.createNotification(
                         user,
                         "KYC Approved! 🎉",
@@ -164,7 +268,7 @@ public class AdminKycService {
                 // Send rejection email using KycEmailService
                 kycEmailService.sendKycRejectionEmail(user.getEmail(), user.getFullName(), "RENTER", rejectionReason);
 
-                // ✅ NOTIFICATION: To user - KYC Rejected
+                // NOTIFICATION: To user - KYC Rejected
                 notificationService.createNotification(
                         user,
                         "KYC Rejected ❌",
@@ -223,7 +327,7 @@ public class AdminKycService {
                 // Send approval email using KycEmailService
                 kycEmailService.sendKycApprovalEmail(user.getEmail(), user.getFullName(), "OWNER");
 
-                // ✅ NOTIFICATION: To user - Owner KYC Approved
+                // NOTIFICATION: To user - Owner KYC Approved
                 notificationService.createNotification(
                         user,
                         "Owner KYC Approved! 🎉",
@@ -258,7 +362,7 @@ public class AdminKycService {
                 // Send rejection email using KycEmailService
                 kycEmailService.sendKycRejectionEmail(user.getEmail(), user.getFullName(), "OWNER", rejectionReason);
 
-                // ✅ NOTIFICATION: To user - Owner KYC Rejected
+                // NOTIFICATION: To user - Owner KYC Rejected
                 notificationService.createNotification(
                         user,
                         "Owner KYC Rejected ❌",

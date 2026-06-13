@@ -111,7 +111,10 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth ->
                         auth.requestMatchers(
                                         "/api/auth/**",
-                                        "/api/public/**"
+                                        "/api/public/**",
+                                        "/api/vehicles/**",                        // public vehicle listing/details
+                                        "/api/bookings/vehicle/*/booked-dates",    // calendar display — no auth needed
+                                        "/api/bookings/check-availability"
                                 ).permitAll()
                                 .anyRequest().authenticated()
                 )

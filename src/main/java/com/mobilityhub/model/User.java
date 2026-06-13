@@ -38,6 +38,9 @@ public class User implements UserDetails {
     @Column(nullable = false)
     private String fullName;
 
+    @Column(name = "phone_number")
+    private String phoneNumber;
+
     // Google OAuth Fields
     @Column(name = "first_name")
     private String firstName;
@@ -53,6 +56,11 @@ public class User implements UserDetails {
 
     @Column(name = "avatar_url")
     private String avatarUrl;
+
+    // Base64 avatar storage (no file controller needed)
+    @Lob
+    @Column(name = "avatar_base64", columnDefinition = "LONGTEXT")
+    private String avatarBase64;
 
     @Column(name = "is_oauth_user")
     private boolean isOAuthUser = false;
@@ -72,7 +80,6 @@ public class User implements UserDetails {
     @Column(name = "verification_code_expiry")
     private LocalDateTime verificationCodeExpiry;
 
-    // ✅ ADD THESE FIELDS FOR PASSWORD RESET
     @Column(name = "reset_password_otp")
     private String resetPasswordOtp;
 

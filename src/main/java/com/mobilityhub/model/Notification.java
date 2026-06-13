@@ -31,14 +31,14 @@ public class Notification {
     private String message;
 
     @Enumerated(EnumType.STRING)
-    private NotificationType type;  // KYC_SUBMITTED, KYC_APPROVED, KYC_REJECTED
+    private NotificationType type;
 
     @Enumerated(EnumType.STRING)
     @Builder.Default
     private NotificationStatus status = NotificationStatus.UNREAD;
 
     @Column(name = "related_id")
-    private Long relatedId;  // KYC ID or other reference
+    private Long relatedId;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;
@@ -52,10 +52,18 @@ public class Notification {
     }
 
     public enum NotificationType {
+        // KYC Related
         KYC_SUBMITTED,
         KYC_APPROVED,
         KYC_REJECTED,
-        KYC_PENDING_ADMIN
+        KYC_PENDING_ADMIN,
+
+        // Booking Related
+        BOOKING_REQUEST,
+        BOOKING_SUBMITTED,
+        BOOKING_CONFIRMED,
+        BOOKING_REJECTED,
+        BOOKING_CANCELLED
     }
 
     public enum NotificationStatus {

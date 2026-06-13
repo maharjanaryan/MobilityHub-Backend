@@ -1,4 +1,3 @@
-// controller/AdminKycController.java
 package com.mobilityhub.controller;
 
 import com.mobilityhub.dto.request.KycVerificationRequestDto;
@@ -28,6 +27,32 @@ public class AdminKycController {
     private final AdminKycService adminKycService;
 
     /**
+     * Get all KYC records (both verified and pending)
+     */
+    @GetMapping("/all")
+    public ResponseEntity<List<AdminKycResponseDto>> getAllKyc() {
+        log.info("Admin fetching all KYC records");
+        return ResponseEntity.ok(adminKycService.getAllKyc());
+    }
+
+    /**
+     * Get all KYC records with optional status filter
+     * @param status Optional status filter (PENDING, APPROVED, REJECTED, ALL)
+     */
+    @GetMapping
+    public ResponseEntity<List<AdminKycResponseDto>> getKycWithStatus(
+            @RequestParam(required = false, defaultValue = "ALL") String status) {
+
+        log.info("Admin fetching KYC records with status: {}", status);
+
+        if ("ALL".equalsIgnoreCase(status)) {
+            return ResponseEntity.ok(adminKycService.getAllKyc());
+        } else {
+            return ResponseEntity.ok(adminKycService.getKycByStatus(status));
+        }
+    }
+
+    /**
      * Get all pending renter KYC requests
      */
     @GetMapping("/pending/renters")
@@ -55,11 +80,30 @@ public class AdminKycController {
     }
 
     /**
+     * Get Renter KYC details by ID (GET endpoint for fetching details)
+     */
+    @GetMapping("/renter/{kycId}")
+    public ResponseEntity<KycDetailsResponseDto> getRenterKycDetails(@PathVariable Long kycId) {
+        log.info("Admin fetching RENTER KYC details for ID: {}", kycId);
+        return ResponseEntity.ok(adminKycService.getRenterKycDetails(kycId));
+    }
+
+    /**
+     * Get Owner KYC details by ID (GET endpoint for fetching details)
+     */
+    @GetMapping("/owner/{kycId}")
+    public ResponseEntity<KycDetailsResponseDto> getOwnerKycDetails(@PathVariable Long kycId) {
+        log.info("Admin fetching OWNER KYC details for ID: {}", kycId);
+        return ResponseEntity.ok(adminKycService.getOwnerKycDetails(kycId));
+    }
+
+    /**
      * Get KYC details by ID (for admin review) - Returns KycDetailsResponseDto
+     * Note: This endpoint tries renter first, then owner - may return wrong type if both have same ID
      */
     @GetMapping("/{kycId}")
     public ResponseEntity<KycDetailsResponseDto> getKycDetails(@PathVariable Long kycId) {
-        log.info("Admin viewing KYC details for ID: {}", kycId);
+        log.info("Admin viewing KYC details for ID: {} (will try renter first, then owner)", kycId);
         return ResponseEntity.ok(adminKycService.getKycDetails(kycId));
     }
 
