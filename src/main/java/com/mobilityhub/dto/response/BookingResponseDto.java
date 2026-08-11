@@ -1,4 +1,3 @@
-// dto/response/BookingResponseDto.java
 package com.mobilityhub.dto.response;
 
 import lombok.Builder;
@@ -30,7 +29,9 @@ public class BookingResponseDto {
     private BigDecimal insuranceCost;
     private String bookingStatus;
     private String paymentStatus;
+    private String paymentMethod;  // ← ADD THIS FIELD
     private String rejectionReason;
+    private String ownerNotes;     // ← ADD THIS FIELD (optional but recommended)
     private LocalDateTime createdAt;
     private LocalDateTime approvedAt;
 }

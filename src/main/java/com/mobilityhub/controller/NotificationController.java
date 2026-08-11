@@ -66,11 +66,20 @@ public class NotificationController {
     }
 
     /**
-     * Get admin notifications (all KYC submissions)
+     * Get admin notifications (all KYC submissions and vehicle submissions)
      */
     @GetMapping("/admin/all")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<List<NotificationResponseDto>> getAdminNotifications() {
         return ResponseEntity.ok(notificationService.getAdminNotifications());
+    }
+
+    /**
+     * Get notifications by related ID (for debugging/admin)
+     */
+    @GetMapping("/related/{relatedId}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<List<NotificationResponseDto>> getNotificationsByRelatedId(@PathVariable Long relatedId) {
+        return ResponseEntity.ok(notificationService.getNotificationsByRelatedId(relatedId));
     }
 }

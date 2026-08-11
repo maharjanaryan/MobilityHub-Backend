@@ -5,9 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mobilityhub.dto.request.VehicleRequestDto;
 import com.mobilityhub.dto.request.VehicleSearchRequestDto;
 import com.mobilityhub.dto.response.VehicleResponseDto;
-import com.mobilityhub.model.OwnerKyc;
-import com.mobilityhub.model.User;
-import com.mobilityhub.model.Vehicle;
+import com.mobilityhub.model.*;
 import com.mobilityhub.repository.OwnerKycRepository;
 import com.mobilityhub.repository.UserRepository;
 import com.mobilityhub.repository.VehicleRepository;
@@ -32,8 +30,9 @@ public class VehicleService {
 
     private final VehicleRepository vehicleRepository;
     private final UserRepository userRepository;
-    private final OwnerKycRepository ownerKycRepository;  // ✅ Add this
+    private final OwnerKycRepository ownerKycRepository;
     private final ObjectMapper objectMapper;
+    private final NotificationService notificationService;
 
     /**
      * Check if user can add vehicle (has verified Owner KYC)
@@ -88,6 +87,7 @@ public class VehicleService {
                 .photos(convertPhotosToString(request.getPhotos()))
                 .isAvailable(true)
                 .isVerified(false)
+                .rejectionReason(null)
                 .totalRentals(0)
                 .averageRating(0.0)
                 .viewCount(0)
@@ -95,6 +95,29 @@ public class VehicleService {
 
         Vehicle savedVehicle = vehicleRepository.save(vehicle);
         log.info("New vehicle added by user: {} - {} {}", owner.getUsername(), vehicle.getBrand(), vehicle.getModel());
+
+        // Create notification for vehicle owner
+        notificationService.createNotification(
+                owner,
+                "Vehicle Submitted for Verification",
+                String.format("Your vehicle '%s %s (%s)' has been submitted for verification. We'll notify you once it's reviewed.",
+                        vehicle.getBrand(), vehicle.getModel(), vehicle.getLicensePlate()),
+                Notification.NotificationType.VEHICLE_SUBMITTED,
+                savedVehicle.getId()
+        );
+
+        // Notify all admins about new vehicle submission
+        List<User> admins = userRepository.findByRole(Role.ADMIN);
+        if (!admins.isEmpty()) {
+            notificationService.createNotificationForUsers(
+                    admins,
+                    "New Vehicle Pending Verification",
+                    String.format("A new vehicle '%s %s' has been submitted for verification by %s",
+                            vehicle.getBrand(), vehicle.getModel(), owner.getFullName()),
+                    Notification.NotificationType.VEHICLE_SUBMITTED,
+                    savedVehicle.getId()
+            );
+        }
 
         return convertToResponseDto(savedVehicle);
     }
@@ -175,8 +198,24 @@ public class VehicleService {
         vehicle.setTerms(request.getTerms());
         vehicle.setPhotos(convertPhotosToString(request.getPhotos()));
 
+        // Reset rejection reason and verification status if vehicle is being updated
+        if (vehicle.getRejectionReason() != null) {
+            vehicle.setRejectionReason(null);
+            vehicle.setIsVerified(false);
+        }
+
         Vehicle updatedVehicle = vehicleRepository.save(vehicle);
         log.info("Vehicle updated: {} {}", vehicle.getBrand(), vehicle.getModel());
+
+        // Notify owner about update
+        notificationService.createNotification(
+                vehicle.getOwner(),
+                "Vehicle Updated",
+                String.format("Your vehicle '%s %s (%s)' has been updated and requires re-verification.",
+                        vehicle.getBrand(), vehicle.getModel(), vehicle.getLicensePlate()),
+                Notification.NotificationType.VEHICLE_UPDATED,
+                vehicleId
+        );
 
         return convertToResponseDto(updatedVehicle);
     }
@@ -193,8 +232,9 @@ public class VehicleService {
             throw new RuntimeException("You don't have permission to delete this vehicle");
         }
 
+        String vehicleInfo = vehicle.getBrand() + " " + vehicle.getModel();
         vehicleRepository.delete(vehicle);
-        log.info("Vehicle deleted: {} {}", vehicle.getBrand(), vehicle.getModel());
+        log.info("Vehicle deleted: {}", vehicleInfo);
     }
 
     /**
@@ -214,6 +254,16 @@ public class VehicleService {
 
         log.info("Vehicle availability toggled to {} for: {} {}",
                 vehicle.getIsAvailable(), vehicle.getBrand(), vehicle.getModel());
+
+        String status = vehicle.getIsAvailable() ? "available" : "unavailable";
+        notificationService.createNotification(
+                vehicle.getOwner(),
+                "Vehicle Availability Updated",
+                String.format("Your vehicle '%s %s (%s)' is now %s for booking.",
+                        vehicle.getBrand(), vehicle.getModel(), vehicle.getLicensePlate(), status),
+                Notification.NotificationType.VEHICLE_UPDATED,
+                vehicleId
+        );
 
         return convertToResponseDto(updatedVehicle);
     }
@@ -271,11 +321,39 @@ public class VehicleService {
             vehicle.setIsVerified(true);
             vehicle.setVerifiedBy(adminId);
             vehicle.setVerifiedAt(LocalDateTime.now());
+            vehicle.setRejectionReason(null);
+            vehicle.setIsAvailable(true);
             log.info("Vehicle verified by admin: {} {}", vehicle.getBrand(), vehicle.getModel());
+
+            // Notify owner about approval
+            notificationService.createNotification(
+                    vehicle.getOwner(),
+                    "Vehicle Approved! 🎉",
+                    String.format("Your vehicle '%s %s (%s)' has been approved and is now available for booking!",
+                            vehicle.getBrand(), vehicle.getModel(), vehicle.getLicensePlate()),
+                    Notification.NotificationType.VEHICLE_APPROVED,
+                    vehicleId
+            );
+
         } else {
             vehicle.setIsVerified(false);
+            vehicle.setRejectionReason(rejectionReason);
+            vehicle.setVerifiedBy(null);
+            vehicle.setVerifiedAt(null);
+            vehicle.setIsAvailable(false);
             log.info("Vehicle verification rejected: {} {} - Reason: {}",
                     vehicle.getBrand(), vehicle.getModel(), rejectionReason);
+
+            // Notify owner about rejection
+            notificationService.createNotification(
+                    vehicle.getOwner(),
+                    "Vehicle Verification Rejected",
+                    String.format("Your vehicle '%s %s (%s)' was not approved. Reason: %s. Please update and resubmit.",
+                            vehicle.getBrand(), vehicle.getModel(), vehicle.getLicensePlate(),
+                            rejectionReason != null ? rejectionReason : "No reason provided"),
+                    Notification.NotificationType.VEHICLE_REJECTED,
+                    vehicleId
+            );
         }
 
         Vehicle savedVehicle = vehicleRepository.save(vehicle);
@@ -286,10 +364,19 @@ public class VehicleService {
      * Admin - Get pending vehicles for verification
      */
     public List<VehicleResponseDto> getPendingVehicles() {
-        return vehicleRepository.findByIsVerifiedFalse()
+        return vehicleRepository.findByIsVerifiedFalseAndRejectionReasonIsNull()
                 .stream()
                 .map(this::convertToResponseDto)
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Admin - Get all vehicles (for admin management)
+     */
+    public Page<VehicleResponseDto> getAllVehicles(int page, int size) {
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        return vehicleRepository.findAll(pageable)
+                .map(this::convertToResponseDto);
     }
 
     // ==================== HELPER METHODS ====================
@@ -386,6 +473,8 @@ public class VehicleService {
                 .latitude(vehicle.getLatitude())
                 .longitude(vehicle.getLongitude())
                 .isAvailable(vehicle.getIsAvailable())
+                .isVerified(vehicle.getIsVerified())
+                .rejectionReason(vehicle.getRejectionReason())
                 .availableFrom(vehicle.getAvailableFrom())
                 .availableTo(vehicle.getAvailableTo())
                 .minRentalDays(vehicle.getMinRentalDays())

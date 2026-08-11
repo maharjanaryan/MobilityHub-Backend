@@ -48,6 +48,8 @@ public class VehicleResponseDto {
 
     // Availability
     private Boolean isAvailable;
+    private Boolean isVerified;           // ← ADD THIS
+    private String rejectionReason;        // ← ADD THIS
     private LocalDateTime availableFrom;
     private LocalDateTime availableTo;
     private Integer minRentalDays;

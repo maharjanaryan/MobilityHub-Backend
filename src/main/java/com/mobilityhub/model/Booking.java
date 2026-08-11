@@ -1,4 +1,4 @@
-// model/Booking.java
+// com/mobilityhub/model/Booking.java
 package com.mobilityhub.model;
 
 import jakarta.persistence.*;
@@ -73,6 +73,12 @@ public class Booking {
 
     @Column(name = "payment_id")
     private String paymentId;
+
+    @Column(name = "transaction_id")
+    private String transactionId;
+
+    @Column(name = "payment_verified_at")
+    private LocalDateTime paymentVerifiedAt;
 
     @Column(name = "booking_status")
     @Enumerated(EnumType.STRING)

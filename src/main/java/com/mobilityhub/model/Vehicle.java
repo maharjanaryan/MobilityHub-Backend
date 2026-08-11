@@ -117,6 +117,10 @@ public class Vehicle {
     @Column(name = "is_verified")
     private Boolean isVerified = false;
 
+    // ✅ ADD THIS FIELD - Rejection reason for admin verification rejection
+    @Column(name = "rejection_reason", columnDefinition = "TEXT")
+    private String rejectionReason;
+
     @Column(name = "verified_by")
     private Long verifiedBy;
 
@@ -146,6 +150,21 @@ public class Vehicle {
     protected void onCreate() {
         createdAt = LocalDateTime.now();
         updatedAt = LocalDateTime.now();
+        if (isAvailable == null) {
+            isAvailable = true;
+        }
+        if (isVerified == null) {
+            isVerified = false;
+        }
+        if (totalRentals == null) {
+            totalRentals = 0;
+        }
+        if (averageRating == null) {
+            averageRating = 0.0;
+        }
+        if (viewCount == null) {
+            viewCount = 0;
+        }
     }
 
     @PreUpdate

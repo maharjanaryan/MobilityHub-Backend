@@ -139,6 +139,17 @@ public class VehicleController {
     }
 
     /**
+     * Admin - Get all vehicles with pagination (for admin management)
+     */
+    @GetMapping("/all")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Page<VehicleResponseDto>> getAllVehicles(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        return ResponseEntity.ok(vehicleService.getAllVehicles(page, size));
+    }
+
+    /**
      * Admin - Get pending vehicles for verification
      */
     @GetMapping("/admin/pending")

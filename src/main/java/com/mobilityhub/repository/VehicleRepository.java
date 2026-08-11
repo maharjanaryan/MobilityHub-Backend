@@ -32,10 +32,13 @@ public interface VehicleRepository extends JpaRepository<Vehicle, Long> {
     Page<Vehicle> findByIsVerifiedTrue(Pageable pageable);
 
     // Find unverified vehicles (for admin)
-    List<Vehicle> findByIsVerifiedFalse();  // ✅ Add this method
-    Page<Vehicle> findByIsVerifiedFalse(Pageable pageable);  // ✅ Add this method
+    List<Vehicle> findByIsVerifiedFalse();
+    Page<Vehicle> findByIsVerifiedFalse(Pageable pageable);
 
-    // Find by city
+    // ✅ ADD THIS METHOD - Find pending vehicles (unverified and not rejected)
+    List<Vehicle> findByIsVerifiedFalseAndRejectionReasonIsNull();
+
+    // Find vehicles by city
     Page<Vehicle> findByCityIgnoreCaseAndIsAvailableTrue(String city, Pageable pageable);
 
     // Find by license plate

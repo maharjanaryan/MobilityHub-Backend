@@ -29,4 +29,8 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
     void markAllAsRead(@Param("userId") Long userId);
 
     List<Notification> findByType(Notification.NotificationType type);
+
+    List<Notification> findByRelatedId(Long relatedId);
+
+    List<Notification> findByTypeAndRelatedId(Notification.NotificationType type, Long relatedId);
 }

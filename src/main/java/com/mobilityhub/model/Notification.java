@@ -58,12 +58,21 @@ public class Notification {
         KYC_REJECTED,
         KYC_PENDING_ADMIN,
 
+        // Vehicle Related
+        VEHICLE_SUBMITTED,
+        VEHICLE_APPROVED,
+        VEHICLE_REJECTED,
+        VEHICLE_UPDATED,
+
         // Booking Related
         BOOKING_REQUEST,
         BOOKING_SUBMITTED,
         BOOKING_CONFIRMED,
         BOOKING_REJECTED,
-        BOOKING_CANCELLED
+        BOOKING_CANCELLED,
+        BOOKING_COMPLETED,
+
+        PAYMENT_RECEIVED
     }
 
     public enum NotificationStatus {

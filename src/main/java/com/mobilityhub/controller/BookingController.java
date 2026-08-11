@@ -1,3 +1,4 @@
+// com/mobilityhub/controller/BookingController.java
 package com.mobilityhub.controller;
 
 import com.mobilityhub.dto.request.BookingActionRequestDto;
@@ -30,7 +31,7 @@ public class BookingController {
     private final BookingService bookingService;
 
     @PostMapping
-    @PreAuthorize("hasRole('USER') or hasRole('OWNER')")
+    @PreAuthorize("hasRole('USER')")
     public ResponseEntity<BookingResponseDto> createBooking(
             @Valid @RequestBody BookingRequestDto request,
             Authentication authentication) {
@@ -40,7 +41,7 @@ public class BookingController {
     }
 
     @GetMapping("/{bookingId}")
-    @PreAuthorize("hasRole('USER') or hasRole('OWNER') or hasRole('ADMIN')")
+    @PreAuthorize("hasRole('USER')")
     public ResponseEntity<BookingResponseDto> getBookingById(
             @PathVariable Long bookingId,
             Authentication authentication) {
@@ -50,7 +51,7 @@ public class BookingController {
     }
 
     @GetMapping("/my-bookings")
-    @PreAuthorize("hasRole('USER') or hasRole('OWNER')")
+    @PreAuthorize("hasRole('USER')")
     public ResponseEntity<Page<BookingResponseDto>> getMyBookings(
             @RequestParam(required = false) String status,
             @RequestParam(defaultValue = "0") int page,
@@ -61,7 +62,7 @@ public class BookingController {
     }
 
     @GetMapping("/owner-bookings")
-    @PreAuthorize("hasRole('OWNER')")
+    @PreAuthorize("hasRole('USER')")
     public ResponseEntity<Page<BookingResponseDto>> getOwnerBookings(
             @RequestParam(required = false) String status,
             @RequestParam(defaultValue = "0") int page,
@@ -72,24 +73,27 @@ public class BookingController {
     }
 
     @GetMapping("/owner/pending")
-    @PreAuthorize("hasRole('OWNER')")
+    @PreAuthorize("hasRole('USER')")
     public ResponseEntity<List<BookingResponseDto>> getPendingBookingsForOwner(Authentication authentication) {
         UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
         return ResponseEntity.ok(bookingService.getPendingBookingsForOwner(userDetails.getId()));
     }
 
     @PostMapping("/{bookingId}/approve")
-    @PreAuthorize("hasRole('OWNER')")
+    @PreAuthorize("hasRole('USER')")
     public ResponseEntity<BookingResponseDto> approveBooking(
             @PathVariable Long bookingId,
-            @RequestBody BookingActionRequestDto request,
+            @RequestBody(required = false) BookingActionRequestDto request,
             Authentication authentication) {
         UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
+        if (request == null) {
+            request = new BookingActionRequestDto();
+        }
         return ResponseEntity.ok(bookingService.approveBooking(bookingId, userDetails.getId(), request));
     }
 
     @PostMapping("/{bookingId}/reject")
-    @PreAuthorize("hasRole('OWNER')")
+    @PreAuthorize("hasRole('USER')")
     public ResponseEntity<BookingResponseDto> rejectBooking(
             @PathVariable Long bookingId,
             @RequestBody BookingActionRequestDto request,
@@ -99,7 +103,7 @@ public class BookingController {
     }
 
     @PostMapping("/{bookingId}/cancel")
-    @PreAuthorize("hasRole('USER') or hasRole('OWNER')")
+    @PreAuthorize("hasRole('USER')")
     public ResponseEntity<BookingResponseDto> cancelBooking(
             @PathVariable Long bookingId,
             Authentication authentication) {
@@ -107,21 +111,13 @@ public class BookingController {
         return ResponseEntity.ok(bookingService.cancelBooking(bookingId, userDetails.getId()));
     }
 
-    /**
-     * Check vehicle availability for specific dates
-     * Accepts date strings to avoid timezone conversion issues
-     * Frontend sends: "2026-06-13T00:00:00.000Z"
-     * We parse only the date part "2026-06-13" and use start of day
-     */
     @GetMapping("/check-availability")
     public ResponseEntity<Map<String, Boolean>> checkAvailability(
             @RequestParam Long vehicleId,
-            @RequestParam String pickupDate,    // "2026-06-13T00:00:00.000Z"
-            @RequestParam String dropoffDate) { // "2026-06-16T00:00:00.000Z"
+            @RequestParam String pickupDate,
+            @RequestParam String dropoffDate) {
 
         try {
-            // Parse date-only from ISO string, ignore time and timezone
-            // Take only the first 10 characters: "YYYY-MM-DD"
             LocalDate pickupLocalDate = LocalDate.parse(pickupDate.substring(0, 10));
             LocalDate dropoffLocalDate = LocalDate.parse(dropoffDate.substring(0, 10));
 
@@ -141,5 +137,114 @@ public class BookingController {
     @GetMapping("/vehicle/{vehicleId}/booked-dates")
     public ResponseEntity<List<LocalDateTime>> getBookedDates(@PathVariable Long vehicleId) {
         return ResponseEntity.ok(bookingService.getBookedDatesForVehicle(vehicleId));
+    }
+
+    // ============================================
+    // ADMIN ENDPOINTS
+    // ============================================
+
+    /**
+     * Admin - Get all bookings with pagination and filters
+     */
+    @GetMapping("/admin/bookings")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Page<BookingResponseDto>> getAllBookingsForAdmin(
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String paymentStatus,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            Authentication authentication) {
+
+        UserDetailsImpl adminDetails = (UserDetailsImpl) authentication.getPrincipal();
+        log.info("Admin {} fetching all bookings with status: {}, paymentStatus: {}, page: {}, size: {}",
+                adminDetails.getUsername(), status, paymentStatus, page, size);
+
+        return ResponseEntity.ok(bookingService.getAllBookingsForAdmin(status, paymentStatus, page, size));
+    }
+
+    /**
+     * Admin - Get booking statistics
+     */
+    @GetMapping("/admin/bookings/stats")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Map<String, Object>> getBookingStats(Authentication authentication) {
+        UserDetailsImpl adminDetails = (UserDetailsImpl) authentication.getPrincipal();
+        log.info("Admin {} fetching booking statistics", adminDetails.getUsername());
+
+        return ResponseEntity.ok(bookingService.getBookingStats());
+    }
+
+    /**
+     * Admin - Approve booking
+     */
+    @PostMapping("/admin/bookings/{bookingId}/approve")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<BookingResponseDto> adminApproveBooking(
+            @PathVariable Long bookingId,
+            Authentication authentication) {
+        UserDetailsImpl adminDetails = (UserDetailsImpl) authentication.getPrincipal();
+        log.info("Admin {} approving booking {}", adminDetails.getUsername(), bookingId);
+
+        return ResponseEntity.ok(bookingService.adminApproveBooking(bookingId));
+    }
+
+    /**
+     * Admin - Reject booking
+     */
+    @PostMapping("/admin/bookings/{bookingId}/reject")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<BookingResponseDto> adminRejectBooking(
+            @PathVariable Long bookingId,
+            @RequestBody(required = false) Map<String, String> request,
+            Authentication authentication) {
+        UserDetailsImpl adminDetails = (UserDetailsImpl) authentication.getPrincipal();
+        String reason = request != null ? request.get("reason") : null;
+        log.info("Admin {} rejecting booking {} with reason: {}", adminDetails.getUsername(), bookingId, reason);
+
+        return ResponseEntity.ok(bookingService.adminRejectBooking(bookingId, reason));
+    }
+
+    /**
+     * Admin - Cancel booking
+     */
+    @PostMapping("/admin/bookings/{bookingId}/cancel")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<BookingResponseDto> adminCancelBooking(
+            @PathVariable Long bookingId,
+            @RequestBody(required = false) Map<String, String> request,
+            Authentication authentication) {
+        UserDetailsImpl adminDetails = (UserDetailsImpl) authentication.getPrincipal();
+        String reason = request != null ? request.get("reason") : null;
+        log.info("Admin {} cancelling booking {} with reason: {}", adminDetails.getUsername(), bookingId, reason);
+
+        return ResponseEntity.ok(bookingService.adminCancelBooking(bookingId, reason));
+    }
+
+    /**
+     * Admin - Mark booking as ongoing
+     */
+    @PostMapping("/admin/bookings/{bookingId}/ongoing")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<BookingResponseDto> adminMarkAsOngoing(
+            @PathVariable Long bookingId,
+            Authentication authentication) {
+        UserDetailsImpl adminDetails = (UserDetailsImpl) authentication.getPrincipal();
+        log.info("Admin {} marking booking {} as ongoing", adminDetails.getUsername(), bookingId);
+
+        return ResponseEntity.ok(bookingService.adminMarkAsOngoing(bookingId));
+    }
+
+    /**
+     * Admin - Mark booking as completed
+     */
+    @PostMapping("/admin/bookings/{bookingId}/complete")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<BookingResponseDto> adminMarkAsCompleted(
+            @PathVariable Long bookingId,
+            Authentication authentication) {
+        UserDetailsImpl adminDetails = (UserDetailsImpl) authentication.getPrincipal();
+        log.info("Admin {} marking booking {} as completed", adminDetails.getUsername(), bookingId);
+
+        return ResponseEntity.ok(bookingService.adminMarkAsCompleted(bookingId));
     }
 }
