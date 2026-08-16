@@ -1,4 +1,3 @@
-// service/VehicleService.java
 package com.mobilityhub.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -67,7 +66,7 @@ public class VehicleService {
                 .seats(request.getSeats())
                 .doors(request.getDoors())
                 .luggageCapacity(request.getLuggageCapacity())
-                .features(convertFeaturesToString(request.getFeatures()))
+                .features(convertListToString(request.getFeatures()))
                 .pricePerDay(request.getPricePerDay())
                 .pricePerWeek(request.getPricePerWeek())
                 .pricePerMonth(request.getPricePerMonth())
@@ -84,7 +83,8 @@ public class VehicleService {
                 .maxRentalDays(request.getMaxRentalDays() != null ? request.getMaxRentalDays() : 30)
                 .description(request.getDescription())
                 .terms(request.getTerms())
-                .photos(convertPhotosToString(request.getPhotos()))
+                .photos(convertListToString(request.getPhotos()))
+                .bluebookDocument(convertListToString(request.getBluebookDocuments()))
                 .isAvailable(true)
                 .isVerified(false)
                 .rejectionReason(null)
@@ -179,7 +179,7 @@ public class VehicleService {
         vehicle.setSeats(request.getSeats());
         vehicle.setDoors(request.getDoors());
         vehicle.setLuggageCapacity(request.getLuggageCapacity());
-        vehicle.setFeatures(convertFeaturesToString(request.getFeatures()));
+        vehicle.setFeatures(convertListToString(request.getFeatures()));
         vehicle.setPricePerDay(request.getPricePerDay());
         vehicle.setPricePerWeek(request.getPricePerWeek());
         vehicle.setPricePerMonth(request.getPricePerMonth());
@@ -196,7 +196,8 @@ public class VehicleService {
         vehicle.setMaxRentalDays(request.getMaxRentalDays());
         vehicle.setDescription(request.getDescription());
         vehicle.setTerms(request.getTerms());
-        vehicle.setPhotos(convertPhotosToString(request.getPhotos()));
+        vehicle.setPhotos(convertListToString(request.getPhotos()));
+        vehicle.setBluebookDocument(convertListToString(request.getBluebookDocuments()));
 
         // Reset rejection reason and verification status if vehicle is being updated
         if (vehicle.getRejectionReason() != null) {
@@ -381,50 +382,32 @@ public class VehicleService {
 
     // ==================== HELPER METHODS ====================
 
-    private String convertFeaturesToString(List<String> features) {
-        if (features == null || features.isEmpty()) {
+    /**
+     * Generic helper: converts any List<String> (photos, features, bluebook docs) to JSON string
+     */
+    private String convertListToString(List<String> list) {
+        if (list == null || list.isEmpty()) {
             return "[]";
         }
         try {
-            return objectMapper.writeValueAsString(features);
+            return objectMapper.writeValueAsString(list);
         } catch (Exception e) {
-            log.error("Failed to convert features to JSON", e);
-            return "[]";
-        }
-    }
-
-    private List<String> convertFeaturesToList(String featuresJson) {
-        if (featuresJson == null || featuresJson.isEmpty()) {
-            return Collections.emptyList();
-        }
-        try {
-            return objectMapper.readValue(featuresJson, List.class);
-        } catch (Exception e) {
-            log.error("Failed to convert features from JSON", e);
-            return Collections.emptyList();
-        }
-    }
-
-    private String convertPhotosToString(List<String> photos) {
-        if (photos == null || photos.isEmpty()) {
-            return "[]";
-        }
-        try {
-            return objectMapper.writeValueAsString(photos);
-        } catch (Exception e) {
-            log.error("Failed to convert photos to JSON", e);
+            log.error("Failed to convert list to JSON", e);
             return "[]";
         }
     }
 
-    private List<String> convertPhotosToList(String photosJson) {
-        if (photosJson == null || photosJson.isEmpty()) {
+    /**
+     * Generic helper: converts JSON string back to List<String>
+     */
+    private List<String> convertStringToList(String json) {
+        if (json == null || json.isEmpty()) {
             return Collections.emptyList();
         }
         try {
-            return objectMapper.readValue(photosJson, List.class);
+            return objectMapper.readValue(json, List.class);
         } catch (Exception e) {
-            log.error("Failed to convert photos from JSON", e);
+            log.error("Failed to convert JSON to list", e);
             return Collections.emptyList();
         }
     }
@@ -461,7 +444,7 @@ public class VehicleService {
                 .seats(vehicle.getSeats())
                 .doors(vehicle.getDoors())
                 .luggageCapacity(vehicle.getLuggageCapacity())
-                .features(convertFeaturesToList(vehicle.getFeatures()))
+                .features(convertStringToList(vehicle.getFeatures()))
                 .pricePerDay(vehicle.getPricePerDay())
                 .pricePerWeek(vehicle.getPricePerWeek())
                 .pricePerMonth(vehicle.getPricePerMonth())
@@ -481,7 +464,8 @@ public class VehicleService {
                 .maxRentalDays(vehicle.getMaxRentalDays())
                 .description(vehicle.getDescription())
                 .terms(vehicle.getTerms())
-                .photos(convertPhotosToList(vehicle.getPhotos()))
+                .photos(convertStringToList(vehicle.getPhotos()))
+                .bluebookDocuments(convertStringToList(vehicle.getBluebookDocument()))
                 .totalRentals(vehicle.getTotalRentals())
                 .averageRating(vehicle.getAverageRating())
                 .viewCount(vehicle.getViewCount())

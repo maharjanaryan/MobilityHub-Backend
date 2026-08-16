@@ -1,4 +1,3 @@
-// dto/response/VehicleResponseDto.java
 package com.mobilityhub.dto.response;
 
 import lombok.Builder;
@@ -48,8 +47,8 @@ public class VehicleResponseDto {
 
     // Availability
     private Boolean isAvailable;
-    private Boolean isVerified;           // ← ADD THIS
-    private String rejectionReason;        // ← ADD THIS
+    private Boolean isVerified;
+    private String rejectionReason;
     private LocalDateTime availableFrom;
     private LocalDateTime availableTo;
     private Integer minRentalDays;
@@ -61,6 +60,9 @@ public class VehicleResponseDto {
 
     // Photos
     private List<String> photos;
+
+    // Bluebook Document
+    private List<String> bluebookDocuments;
 
     // Statistics
     private Integer totalRentals;

@@ -1,4 +1,3 @@
-// dto/request/VehicleRequestDto.java
 package com.mobilityhub.dto.request;
 
 import lombok.Data;
@@ -75,4 +74,8 @@ public class VehicleRequestDto {
 
     // Photos
     private List<String> photos;
+
+    // Bluebook Document (required — proof of vehicle ownership)
+    @NotEmpty(message = "Bluebook document is required")
+    private List<String> bluebookDocuments;
 }

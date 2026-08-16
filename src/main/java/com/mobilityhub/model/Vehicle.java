@@ -1,4 +1,3 @@
-// model/Vehicle.java
 package com.mobilityhub.model;
 
 import jakarta.persistence.*;
@@ -11,8 +10,6 @@ import org.hibernate.annotations.UpdateTimestamp;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
 
 @Data
 @Builder
@@ -110,6 +107,10 @@ public class Vehicle {
     @Column(columnDefinition = "TEXT")
     private String photos;  // JSON array of image URLs/base64
 
+    // Bluebook / Vehicle Registration Document (owner-provided proof of ownership)
+    @Column(name = "bluebook_document", columnDefinition = "TEXT")
+    private String bluebookDocument;  // JSON array of image URLs/base64 (front & back)
+
     // Status
     @Column(name = "is_available")
     private Boolean isAvailable = true;
@@ -117,7 +118,6 @@ public class Vehicle {
     @Column(name = "is_verified")
     private Boolean isVerified = false;
 
-    // ✅ ADD THIS FIELD - Rejection reason for admin verification rejection
     @Column(name = "rejection_reason", columnDefinition = "TEXT")
     private String rejectionReason;
 
