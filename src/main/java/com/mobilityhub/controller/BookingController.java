@@ -1,9 +1,10 @@
-// com/mobilityhub/controller/BookingController.java
 package com.mobilityhub.controller;
 
 import com.mobilityhub.dto.request.BookingActionRequestDto;
 import com.mobilityhub.dto.request.BookingRequestDto;
 import com.mobilityhub.dto.response.BookingResponseDto;
+import com.mobilityhub.dto.response.VehicleAvailabilityStatusDto;
+import com.mobilityhub.dto.response.VehicleBookingStatusDto;
 import com.mobilityhub.security.services.UserDetailsImpl;
 import com.mobilityhub.service.BookingService;
 import jakarta.validation.Valid;
@@ -30,6 +31,10 @@ public class BookingController {
 
     private final BookingService bookingService;
 
+    // ─────────────────────────────────────────────
+    // CREATE BOOKING
+    // ─────────────────────────────────────────────
+
     @PostMapping
     @PreAuthorize("hasRole('USER')")
     public ResponseEntity<BookingResponseDto> createBooking(
@@ -39,6 +44,10 @@ public class BookingController {
         BookingResponseDto response = bookingService.createBooking(userDetails.getId(), request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
+
+    // ─────────────────────────────────────────────
+    // GET BOOKINGS
+    // ─────────────────────────────────────────────
 
     @GetMapping("/{bookingId}")
     @PreAuthorize("hasRole('USER')")
@@ -79,6 +88,56 @@ public class BookingController {
         return ResponseEntity.ok(bookingService.getPendingBookingsForOwner(userDetails.getId()));
     }
 
+    // ─────────────────────────────────────────────
+    // OWNER VEHICLE STATUS ENDPOINTS
+    // ─────────────────────────────────────────────
+
+    @GetMapping("/owner/vehicles/status")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<List<VehicleBookingStatusDto>> getOwnersVehicleBookingStatus(
+            Authentication authentication) {
+        UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
+        log.info("Fetching vehicle booking status for owner: {}", userDetails.getId());
+        return ResponseEntity.ok(bookingService.getOwnersBookedVehicles(userDetails.getId()));
+    }
+
+    @GetMapping("/owner/vehicles/availability")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<List<VehicleAvailabilityStatusDto>> getOwnersVehicleAvailability(
+            Authentication authentication) {
+        UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
+        log.info("Fetching vehicle availability for owner: {}", userDetails.getId());
+        return ResponseEntity.ok(bookingService.getOwnersVehicleAvailability(userDetails.getId()));
+    }
+
+    @GetMapping("/owner/vehicle/{vehicleId}/bookings")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<Page<BookingResponseDto>> getOwnerVehicleBookings(
+            @PathVariable Long vehicleId,
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            Authentication authentication) {
+        UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
+        log.info("Fetching bookings for owner: {}, vehicle: {}, status: {}",
+                userDetails.getId(), vehicleId, status);
+        return ResponseEntity.ok(bookingService.getBookingsByOwnerAndVehicle(
+                userDetails.getId(), vehicleId, status, page, size));
+    }
+
+    @GetMapping("/owner/dashboard/summary")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<Map<String, Object>> getOwnerDashboardSummary(
+            Authentication authentication) {
+        UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
+        log.info("Fetching dashboard summary for owner: {}", userDetails.getId());
+        return ResponseEntity.ok(bookingService.getOwnerBookingSummary(userDetails.getId()));
+    }
+
+    // ─────────────────────────────────────────────
+    // BOOKING ACTIONS (APPROVE / REJECT / CANCEL)
+    // ─────────────────────────────────────────────
+
     @PostMapping("/{bookingId}/approve")
     @PreAuthorize("hasRole('USER')")
     public ResponseEntity<BookingResponseDto> approveBooking(
@@ -111,6 +170,34 @@ public class BookingController {
         return ResponseEntity.ok(bookingService.cancelBooking(bookingId, userDetails.getId()));
     }
 
+    // ─────────────────────────────────────────────
+    // TRIP MANAGEMENT (START / END TRIP)
+    // ─────────────────────────────────────────────
+
+    @PostMapping("/{bookingId}/start-trip")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<BookingResponseDto> startTrip(
+            @PathVariable Long bookingId,
+            Authentication authentication) {
+        UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
+        log.info("User {} starting trip for booking {}", userDetails.getId(), bookingId);
+        return ResponseEntity.ok(bookingService.startTrip(bookingId, userDetails.getId()));
+    }
+
+    @PostMapping("/{bookingId}/end-trip")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<BookingResponseDto> endTrip(
+            @PathVariable Long bookingId,
+            Authentication authentication) {
+        UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
+        log.info("User {} ending trip for booking {}", userDetails.getId(), bookingId);
+        return ResponseEntity.ok(bookingService.endTrip(bookingId, userDetails.getId()));
+    }
+
+    // ─────────────────────────────────────────────
+    // AVAILABILITY
+    // ─────────────────────────────────────────────
+
     @GetMapping("/check-availability")
     public ResponseEntity<Map<String, Boolean>> checkAvailability(
             @RequestParam Long vehicleId,
@@ -139,13 +226,10 @@ public class BookingController {
         return ResponseEntity.ok(bookingService.getBookedDatesForVehicle(vehicleId));
     }
 
-    // ============================================
+    // ─────────────────────────────────────────────
     // ADMIN ENDPOINTS
-    // ============================================
+    // ─────────────────────────────────────────────
 
-    /**
-     * Admin - Get all bookings with pagination and filters
-     */
     @GetMapping("/admin/bookings")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Page<BookingResponseDto>> getAllBookingsForAdmin(
@@ -162,9 +246,6 @@ public class BookingController {
         return ResponseEntity.ok(bookingService.getAllBookingsForAdmin(status, paymentStatus, page, size));
     }
 
-    /**
-     * Admin - Get booking statistics
-     */
     @GetMapping("/admin/bookings/stats")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Map<String, Object>> getBookingStats(Authentication authentication) {
@@ -174,9 +255,6 @@ public class BookingController {
         return ResponseEntity.ok(bookingService.getBookingStats());
     }
 
-    /**
-     * Admin - Approve booking
-     */
     @PostMapping("/admin/bookings/{bookingId}/approve")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<BookingResponseDto> adminApproveBooking(
@@ -188,9 +266,6 @@ public class BookingController {
         return ResponseEntity.ok(bookingService.adminApproveBooking(bookingId));
     }
 
-    /**
-     * Admin - Reject booking
-     */
     @PostMapping("/admin/bookings/{bookingId}/reject")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<BookingResponseDto> adminRejectBooking(
@@ -204,9 +279,6 @@ public class BookingController {
         return ResponseEntity.ok(bookingService.adminRejectBooking(bookingId, reason));
     }
 
-    /**
-     * Admin - Cancel booking
-     */
     @PostMapping("/admin/bookings/{bookingId}/cancel")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<BookingResponseDto> adminCancelBooking(
@@ -220,9 +292,6 @@ public class BookingController {
         return ResponseEntity.ok(bookingService.adminCancelBooking(bookingId, reason));
     }
 
-    /**
-     * Admin - Mark booking as ongoing
-     */
     @PostMapping("/admin/bookings/{bookingId}/ongoing")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<BookingResponseDto> adminMarkAsOngoing(
@@ -234,9 +303,6 @@ public class BookingController {
         return ResponseEntity.ok(bookingService.adminMarkAsOngoing(bookingId));
     }
 
-    /**
-     * Admin - Mark booking as completed
-     */
     @PostMapping("/admin/bookings/{bookingId}/complete")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<BookingResponseDto> adminMarkAsCompleted(

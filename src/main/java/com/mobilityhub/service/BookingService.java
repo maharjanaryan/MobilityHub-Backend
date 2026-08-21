@@ -1,3 +1,4 @@
+// com/mobilityhub/service/BookingService.java
 package com.mobilityhub.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -5,6 +6,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mobilityhub.dto.request.BookingActionRequestDto;
 import com.mobilityhub.dto.request.BookingRequestDto;
 import com.mobilityhub.dto.response.BookingResponseDto;
+import com.mobilityhub.dto.response.BookingSummaryDto;
+import com.mobilityhub.dto.response.VehicleAvailabilityStatusDto;
+import com.mobilityhub.dto.response.VehicleBookingStatusDto;
 import com.mobilityhub.model.*;
 import com.mobilityhub.repository.BookingRepository;
 import com.mobilityhub.repository.OwnerKycRepository;
@@ -47,7 +51,7 @@ public class BookingService {
     }
 
     // ─────────────────────────────────────────────
-    // CREATE BOOKING
+    // CREATE BOOKING (WITH RENTER LOCATION ONLY)
     // ─────────────────────────────────────────────
 
     @Transactional
@@ -127,6 +131,7 @@ public class BookingService {
 
         String bookingReference = generateBookingReference();
 
+        // Build booking with renter location only
         Booking booking = Booking.builder()
                 .bookingReference(bookingReference)
                 .renter(renter)
@@ -145,10 +150,14 @@ public class BookingService {
                 .paymentMethod(request.getPaymentMethod())
                 .driverName(request.getDriverName())
                 .driverLicenseNumber(request.getDriverLicenseNumber())
+                // Renter location fields only
+                .renterLocation(request.getRenterLocation())
+                .renterLatitude(request.getRenterLatitude())
+                .renterLongitude(request.getRenterLongitude())
                 .build();
 
         Booking saved = bookingRepository.save(booking);
-        log.info("Booking created: {}", bookingReference);
+        log.info("Booking created: {} with renter location: {}", bookingReference, request.getRenterLocation());
 
         // Notifications
         notificationService.createNotification(
@@ -187,7 +196,6 @@ public class BookingService {
             throw new RuntimeException("Only the vehicle owner can approve this booking");
         }
 
-        // ✅ NEW: Check if payment is completed before approving
         if (booking.getPaymentStatus() != Booking.PaymentStatus.COMPLETED) {
             throw new RuntimeException("Cannot approve booking. Payment has not been completed yet.");
         }
@@ -247,7 +255,6 @@ public class BookingService {
 
         Booking saved = bookingRepository.save(booking);
 
-        // If payment was already made, initiate refund
         if (booking.getPaymentStatus() == Booking.PaymentStatus.COMPLETED) {
             booking.setPaymentStatus(Booking.PaymentStatus.REFUNDED);
             bookingRepository.save(booking);
@@ -290,7 +297,6 @@ public class BookingService {
 
         booking.setBookingStatus(Booking.BookingStatus.CANCELLED);
 
-        // If payment was already made, initiate refund
         if (booking.getPaymentStatus() == Booking.PaymentStatus.COMPLETED) {
             booking.setPaymentStatus(Booking.PaymentStatus.REFUNDED);
         }
@@ -302,6 +308,81 @@ public class BookingService {
                 "Booking Cancelled",
                 "Your booking has been cancelled successfully.",
                 Notification.NotificationType.BOOKING_CANCELLED,
+                booking.getId()
+        );
+
+        return mapToResponseDto(saved);
+    }
+
+    // ─────────────────────────────────────────────
+    // TRIP MANAGEMENT (START / END TRIP)
+    // ─────────────────────────────────────────────
+
+    @Transactional
+    public BookingResponseDto startTrip(Long bookingId, Long userId) {
+        Booking booking = bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new RuntimeException("Booking not found"));
+
+        boolean isRenter = booking.getRenter().getId().equals(userId);
+        boolean isOwner = booking.getOwner().getId().equals(userId);
+
+        if (!isRenter && !isOwner) {
+            throw new RuntimeException("You don't have permission to start this trip");
+        }
+
+        if (booking.getBookingStatus() != Booking.BookingStatus.CONFIRMED) {
+            throw new RuntimeException("Only confirmed bookings can be started. Current status: " + booking.getBookingStatus());
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        if (now.isBefore(booking.getPickupDate())) {
+            throw new RuntimeException("Cannot start trip before pickup date: " + booking.getPickupDate());
+        }
+
+        booking.setBookingStatus(Booking.BookingStatus.ACTIVE);
+        booking.setTripStartedAt(now);
+        Booking saved = bookingRepository.save(booking);
+
+        log.info("🚗 Trip started for booking {} by user {}", bookingId, userId);
+
+        notificationService.createNotification(
+                booking.getRenter(),
+                "Trip Started! 🚗",
+                "Your trip with " + booking.getVehicle().getBrand() + " " + booking.getVehicle().getModel() + " has started. Drive safe!",
+                Notification.NotificationType.BOOKING_CONFIRMED,
+                booking.getId()
+        );
+
+        return mapToResponseDto(saved);
+    }
+
+    @Transactional
+    public BookingResponseDto endTrip(Long bookingId, Long userId) {
+        Booking booking = bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new RuntimeException("Booking not found"));
+
+        boolean isRenter = booking.getRenter().getId().equals(userId);
+        boolean isOwner = booking.getOwner().getId().equals(userId);
+
+        if (!isRenter && !isOwner) {
+            throw new RuntimeException("You don't have permission to end this trip");
+        }
+
+        if (booking.getBookingStatus() != Booking.BookingStatus.ACTIVE) {
+            throw new RuntimeException("Only active trips can be ended. Current status: " + booking.getBookingStatus());
+        }
+
+        booking.setBookingStatus(Booking.BookingStatus.COMPLETED);
+        booking.setTripEndedAt(LocalDateTime.now());
+        Booking saved = bookingRepository.save(booking);
+
+        log.info("🏁 Trip ended for booking {} by user {}", bookingId, userId);
+
+        notificationService.createNotification(
+                booking.getRenter(),
+                "Trip Completed! ✅",
+                "Your trip with " + booking.getVehicle().getBrand() + " " + booking.getVehicle().getModel() + " has been completed. Thank you for using our service!",
+                Notification.NotificationType.BOOKING_COMPLETED,
                 booking.getId()
         );
 
@@ -385,6 +466,260 @@ public class BookingService {
     }
 
     // ─────────────────────────────────────────────
+    // OWNER VEHICLE STATUS METHODS
+    // ─────────────────────────────────────────────
+
+    public List<VehicleBookingStatusDto> getOwnersBookedVehicles(Long ownerId) {
+        log.info("Fetching booking status for all vehicles owned by user: {}", ownerId);
+
+        if (!hasVerifiedOwnerKyc(ownerId)) {
+            throw new RuntimeException("Owner KYC verification required to view vehicle booking status");
+        }
+
+        List<Vehicle> ownerVehicles = vehicleRepository.findByOwnerId(ownerId);
+
+        if (ownerVehicles.isEmpty()) {
+            log.info("No vehicles found for owner: {}", ownerId);
+            return Collections.emptyList();
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        List<Booking.BookingStatus> activeStatuses = List.of(
+                Booking.BookingStatus.CONFIRMED,
+                Booking.BookingStatus.ACTIVE
+        );
+
+        return ownerVehicles.stream()
+                .map(vehicle -> {
+                    List<Booking> activeBookings = bookingRepository.findByVehicleIdAndBookingStatusIn(
+                            vehicle.getId(),
+                            activeStatuses
+                    );
+
+                    List<Booking> currentActiveBookings = activeBookings.stream()
+                            .filter(b ->
+                                    b.getPickupDate().isBefore(now) &&
+                                            b.getDropoffDate().isAfter(now)
+                            )
+                            .collect(Collectors.toList());
+
+                    LocalDateTime nextAvailableDate = null;
+                    if (!activeBookings.isEmpty()) {
+                        LocalDateTime lastDropoff = activeBookings.stream()
+                                .filter(b -> b.getDropoffDate().isAfter(now))
+                                .map(Booking::getDropoffDate)
+                                .max(LocalDateTime::compareTo)
+                                .orElse(null);
+                        nextAvailableDate = lastDropoff;
+                    }
+
+                    boolean isCurrentlyBooked = !currentActiveBookings.isEmpty();
+
+                    return VehicleBookingStatusDto.builder()
+                            .vehicleId(vehicle.getId())
+                            .vehicleName(vehicle.getBrand() + " " + vehicle.getModel())
+                            .licensePlate(vehicle.getLicensePlate())
+                            .brand(vehicle.getBrand())
+                            .model(vehicle.getModel())
+                            .year(vehicle.getYear())
+                            .isCurrentlyBooked(isCurrentlyBooked)
+                            .activeBookings(currentActiveBookings.stream()
+                                    .map(this::mapToBookingSummaryDto)
+                                    .collect(Collectors.toList()))
+                            .nextAvailableDate(nextAvailableDate)
+                            .totalActiveBookings(currentActiveBookings.size())
+                            .build();
+                })
+                .collect(Collectors.toList());
+    }
+
+    public List<VehicleAvailabilityStatusDto> getOwnersVehicleAvailability(Long ownerId) {
+        log.info("Fetching availability status for all vehicles owned by user: {}", ownerId);
+
+        if (!hasVerifiedOwnerKyc(ownerId)) {
+            throw new RuntimeException("Owner KYC verification required to view vehicle availability");
+        }
+
+        List<Vehicle> ownerVehicles = vehicleRepository.findByOwnerId(ownerId);
+
+        if (ownerVehicles.isEmpty()) {
+            log.info("No vehicles found for owner: {}", ownerId);
+            return Collections.emptyList();
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime thirtyDaysFromNow = now.plusDays(30);
+        List<Booking.BookingStatus> relevantStatuses = List.of(
+                Booking.BookingStatus.PENDING,
+                Booking.BookingStatus.CONFIRMED,
+                Booking.BookingStatus.ACTIVE
+        );
+
+        return ownerVehicles.stream()
+                .map(vehicle -> {
+                    List<Booking> upcomingBookings = bookingRepository
+                            .findActiveBookingsForVehicleInDateRange(
+                                    vehicle.getId(),
+                                    relevantStatuses,
+                                    now,
+                                    thirtyDaysFromNow
+                            );
+
+                    double availabilityPercentage = calculateAvailabilityPercentage(
+                            upcomingBookings,
+                            now,
+                            thirtyDaysFromNow
+                    );
+
+                    boolean isAvailable = upcomingBookings.isEmpty() ||
+                            upcomingBookings.stream().noneMatch(b ->
+                                    b.getPickupDate().isBefore(now) &&
+                                            b.getDropoffDate().isAfter(now)
+                            );
+
+                    LocalDateTime nextBookingDate = bookingRepository.findNextBookingDate(
+                            vehicle.getId(),
+                            relevantStatuses,
+                            now
+                    );
+
+                    return VehicleAvailabilityStatusDto.builder()
+                            .vehicleId(vehicle.getId())
+                            .vehicleName(vehicle.getBrand() + " " + vehicle.getModel())
+                            .licensePlate(vehicle.getLicensePlate())
+                            .brand(vehicle.getBrand())
+                            .model(vehicle.getModel())
+                            .year(vehicle.getYear())
+                            .isAvailable(isAvailable)
+                            .availabilityPercentage(availabilityPercentage)
+                            .totalUpcomingBookings(upcomingBookings.size())
+                            .upcomingBookings(upcomingBookings.stream()
+                                    .map(this::mapToBookingSummaryDto)
+                                    .collect(Collectors.toList()))
+                            .nextBookingDate(nextBookingDate)
+                            .build();
+                })
+                .collect(Collectors.toList());
+    }
+
+    public Page<BookingResponseDto> getBookingsByOwnerAndVehicle(
+            Long ownerId,
+            Long vehicleId,
+            String status,
+            int page,
+            int size) {
+
+        log.info("Fetching bookings for owner: {}, vehicle: {}, status: {}", ownerId, vehicleId, status);
+
+        if (!hasVerifiedOwnerKyc(ownerId)) {
+            throw new RuntimeException("Owner KYC verification required to view vehicle bookings");
+        }
+
+        Vehicle vehicle = vehicleRepository.findById(vehicleId)
+                .orElseThrow(() -> new RuntimeException("Vehicle not found"));
+
+        if (!vehicle.getOwner().getId().equals(ownerId)) {
+            throw new RuntimeException("You don't have permission to view bookings for this vehicle");
+        }
+
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+
+        Page<Booking> bookings;
+        if (status != null && !status.equalsIgnoreCase("all")) {
+            bookings = bookingRepository.findByOwnerIdAndVehicleIdAndBookingStatus(
+                    ownerId,
+                    vehicleId,
+                    Booking.BookingStatus.valueOf(status.toUpperCase()),
+                    pageable
+            );
+        } else {
+            bookings = bookingRepository.findByOwnerIdAndVehicleId(
+                    ownerId,
+                    vehicleId,
+                    pageable
+            );
+        }
+
+        return bookings.map(this::mapToResponseDto);
+    }
+
+    public Map<String, Object> getOwnerBookingSummary(Long ownerId) {
+        log.info("Getting booking summary for owner: {}", ownerId);
+
+        if (!hasVerifiedOwnerKyc(ownerId)) {
+            throw new RuntimeException("Owner KYC verification required to view booking summary");
+        }
+
+        List<Vehicle> ownerVehicles = vehicleRepository.findByOwnerId(ownerId);
+
+        long totalVehicles = ownerVehicles.size();
+        long availableVehicles = ownerVehicles.stream()
+                .filter(Vehicle::getIsAvailable)
+                .count();
+
+        LocalDateTime now = LocalDateTime.now();
+        List<Booking.BookingStatus> activeStatuses = List.of(
+                Booking.BookingStatus.CONFIRMED,
+                Booking.BookingStatus.ACTIVE
+        );
+
+        long currentlyBookedVehicles = ownerVehicles.stream()
+                .filter(vehicle -> {
+                    Integer count = bookingRepository.countActiveBookingsForVehicle(
+                            vehicle.getId(),
+                            activeStatuses,
+                            now
+                    );
+                    return count != null && count > 0;
+                })
+                .count();
+
+        long pendingBookings = bookingRepository.countByOwnerIdAndBookingStatus(
+                ownerId, Booking.BookingStatus.PENDING
+        );
+        long confirmedBookings = bookingRepository.countByOwnerIdAndBookingStatus(
+                ownerId, Booking.BookingStatus.CONFIRMED
+        );
+        long activeBookings = bookingRepository.countByOwnerIdAndBookingStatus(
+                ownerId, Booking.BookingStatus.ACTIVE
+        );
+        long completedBookings = bookingRepository.countByOwnerIdAndBookingStatus(
+                ownerId, Booking.BookingStatus.COMPLETED
+        );
+        long cancelledBookings = bookingRepository.countByOwnerIdAndBookingStatus(
+                ownerId, Booking.BookingStatus.CANCELLED
+        );
+        long rejectedBookings = bookingRepository.countByOwnerIdAndBookingStatus(
+                ownerId, Booking.BookingStatus.REJECTED
+        );
+
+        Double totalRevenue = bookingRepository.sumTotalAmountByOwnerIdAndBookingStatusIn(
+                ownerId,
+                List.of(Booking.BookingStatus.COMPLETED, Booking.BookingStatus.ACTIVE)
+        );
+
+        Double upcomingRevenue = bookingRepository.sumTotalAmountByOwnerIdAndBookingStatusIn(
+                ownerId,
+                List.of(Booking.BookingStatus.CONFIRMED)
+        );
+
+        Map<String, Object> summary = new HashMap<>();
+        summary.put("totalVehicles", totalVehicles);
+        summary.put("availableVehicles", availableVehicles);
+        summary.put("currentlyBookedVehicles", currentlyBookedVehicles);
+        summary.put("pendingBookings", pendingBookings);
+        summary.put("confirmedBookings", confirmedBookings);
+        summary.put("activeBookings", activeBookings);
+        summary.put("completedBookings", completedBookings);
+        summary.put("cancelledBookings", cancelledBookings);
+        summary.put("rejectedBookings", rejectedBookings);
+        summary.put("totalRevenue", totalRevenue != null ? totalRevenue : 0.0);
+        summary.put("upcomingRevenue", upcomingRevenue != null ? upcomingRevenue : 0.0);
+
+        return summary;
+    }
+
+    // ─────────────────────────────────────────────
     // ADMIN METHODS
     // ─────────────────────────────────────────────
 
@@ -446,7 +781,6 @@ public class BookingService {
             throw new RuntimeException("Only pending bookings can be approved");
         }
 
-        // ✅ Check payment status
         if (booking.getPaymentStatus() != Booking.PaymentStatus.COMPLETED) {
             throw new RuntimeException("Cannot approve booking. Payment not completed.");
         }
@@ -481,7 +815,6 @@ public class BookingService {
             booking.setRejectionReason(reason);
         }
 
-        // If payment was already made, initiate refund
         if (booking.getPaymentStatus() == Booking.PaymentStatus.COMPLETED) {
             booking.setPaymentStatus(Booking.PaymentStatus.REFUNDED);
         }
@@ -516,7 +849,6 @@ public class BookingService {
             booking.setRejectionReason(reason);
         }
 
-        // If payment was already made, initiate refund
         if (booking.getPaymentStatus() == Booking.PaymentStatus.COMPLETED) {
             booking.setPaymentStatus(Booking.PaymentStatus.REFUNDED);
         }
@@ -600,20 +932,101 @@ public class BookingService {
         }
     }
 
+    private double calculateAvailabilityPercentage(
+            List<Booking> bookings,
+            LocalDateTime startDate,
+            LocalDateTime endDate) {
+
+        if (bookings.isEmpty()) {
+            return 100.0;
+        }
+
+        long totalDays = ChronoUnit.DAYS.between(startDate, endDate);
+        if (totalDays <= 0) {
+            return 0.0;
+        }
+
+        Set<LocalDate> bookedDays = new HashSet<>();
+        for (Booking booking : bookings) {
+            LocalDate bookingStart = booking.getPickupDate().toLocalDate();
+            LocalDate bookingEnd = booking.getDropoffDate().toLocalDate();
+
+            LocalDate start = bookingStart.isBefore(startDate.toLocalDate()) ?
+                    startDate.toLocalDate() : bookingStart;
+            LocalDate end = bookingEnd.isAfter(endDate.toLocalDate()) ?
+                    endDate.toLocalDate() : bookingEnd;
+
+            LocalDate current = start;
+            while (current.isBefore(end) || current.equals(end)) {
+                bookedDays.add(current);
+                current = current.plusDays(1);
+            }
+        }
+
+        long bookedDaysCount = bookedDays.size();
+        long availableDays = totalDays - bookedDaysCount;
+
+        return (double) availableDays / totalDays * 100;
+    }
+
+    private BookingSummaryDto mapToBookingSummaryDto(Booking booking) {
+        return BookingSummaryDto.builder()
+                .bookingId(booking.getId())
+                .bookingReference(booking.getBookingReference())
+                .renterName(booking.getRenter().getFullName())
+                .renterEmail(booking.getRenter().getEmail())
+                .renterPhone(booking.getRenter().getPhoneNumber())
+                .pickupDate(booking.getPickupDate())
+                .dropoffDate(booking.getDropoffDate())
+                .status(booking.getBookingStatus().name())
+                .totalAmount(booking.getTotalAmount())
+                .totalDays(booking.getTotalDays())
+                .paymentStatus(booking.getPaymentStatus().name())
+                .paymentMethod(booking.getPaymentMethod())
+                .build();
+    }
+
+    // ─────────────────────────────────────────────
+    // MAP TO RESPONSE DTO (WITH BLUEBOOK DOCUMENTS)
+    // ─────────────────────────────────────────────
+
     private BookingResponseDto mapToResponseDto(Booking b) {
         Vehicle v = b.getVehicle();
+
+        // Parse bluebook documents from vehicle
+        List<String> bluebookDocuments = new ArrayList<>();
+        if (v.getBluebookDocument() != null && !v.getBluebookDocument().isEmpty()) {
+            try {
+                bluebookDocuments = objectMapper.readValue(
+                        v.getBluebookDocument(),
+                        new TypeReference<List<String>>() {}
+                );
+            } catch (Exception e) {
+                log.warn("Failed to parse bluebook documents for vehicle: {}", v.getId());
+            }
+        }
+
         return BookingResponseDto.builder()
                 .id(b.getId())
                 .bookingReference(b.getBookingReference())
                 .vehicleId(v.getId())
                 .vehicleName(v.getBrand() + " " + v.getModel())
+                .vehicleBrand(v.getBrand())
+                .vehicleModel(v.getModel())
                 .vehicleImage(getFirstPhotoUrl(v))
+                .vehicleBluebookDocuments(bluebookDocuments) // ADDED - Bluebook documents
                 .ownerId(b.getOwner().getId())
                 .ownerName(b.getOwner().getFullName())
+                .ownerEmail(b.getOwner().getEmail())
+                .ownerPhone(b.getOwner().getPhoneNumber())
                 .renterId(b.getRenter().getId())
                 .renterName(b.getRenter().getFullName())
                 .renterEmail(b.getRenter().getEmail())
                 .renterPhone(b.getRenter().getPhoneNumber())
+                // Renter location only
+                .renterLocation(b.getRenterLocation())
+                .renterLatitude(b.getRenterLatitude())
+                .renterLongitude(b.getRenterLongitude())
                 .pickupDate(b.getPickupDate())
                 .dropoffDate(b.getDropoffDate())
                 .totalDays(b.getTotalDays())
@@ -627,8 +1040,11 @@ public class BookingService {
                 .paymentMethod(b.getPaymentMethod())
                 .rejectionReason(b.getRejectionReason())
                 .ownerNotes(b.getOwnerNotes())
+                .tripStartedAt(b.getTripStartedAt())
+                .tripEndedAt(b.getTripEndedAt())
                 .createdAt(b.getCreatedAt())
                 .approvedAt(b.getApprovedAt())
+                .updatedAt(b.getUpdatedAt())
                 .build();
     }
 }

@@ -12,6 +12,7 @@ public class VehicleResponseDto {
     private Long id;
     private Long ownerId;
     private String ownerName;
+    private String ownerEmail;
     private String ownerAvatar;
     private Double ownerRating;
     private Integer ownerTotalVehicles;

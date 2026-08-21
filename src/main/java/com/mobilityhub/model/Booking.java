@@ -97,17 +97,34 @@ public class Booking {
     @Column(name = "approved_at")
     private LocalDateTime approvedAt;
 
-    @Column(name = "pickup_location")
-    private String pickupLocation;
+    // ─────────────────────────────────────────────
+    // RENTER LOCATION (ONLY LOCATION FIELD)
+    // ─────────────────────────────────────────────
 
-    @Column(name = "dropoff_location")
-    private String dropoffLocation;
+    @Column(name = "renter_location")
+    private String renterLocation;
+
+    @Column(name = "renter_latitude")
+    private Double renterLatitude;
+
+    @Column(name = "renter_longitude")
+    private Double renterLongitude;
 
     @Column(name = "driver_name")
     private String driverName;
 
     @Column(name = "driver_license_number")
     private String driverLicenseNumber;
+
+    // ─────────────────────────────────────────────
+    // TRIP MANAGEMENT FIELDS
+    // ─────────────────────────────────────────────
+
+    @Column(name = "trip_started_at")
+    private LocalDateTime tripStartedAt;
+
+    @Column(name = "trip_ended_at")
+    private LocalDateTime tripEndedAt;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
@@ -118,13 +135,13 @@ public class Booking {
     private LocalDateTime updatedAt;
 
     public enum BookingStatus {
-        PENDING,      // Waiting for owner approval
-        CONFIRMED,    // Owner approved
-        ACTIVE,       // Vehicle picked up
-        COMPLETED,    // Trip completed
-        CANCELLED,    // Cancelled by renter
-        REJECTED,     // Rejected by owner
-        EXPIRED       // Payment not completed
+        PENDING,
+        CONFIRMED,
+        ACTIVE,
+        COMPLETED,
+        CANCELLED,
+        REJECTED,
+        EXPIRED
     }
 
     public enum PaymentStatus {

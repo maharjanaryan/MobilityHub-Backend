@@ -45,6 +45,98 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     Optional<Booking> findByTransactionId(String transactionId);
 
     // ═══════════════════════════════════════════════════════════════════════════
+    //  NEW METHODS FOR OWNER VEHICLE STATUS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Get active bookings for a vehicle within a date range
+     */
+    @Query("SELECT b FROM Booking b WHERE b.vehicle.id = :vehicleId " +
+            "AND b.bookingStatus IN :statuses " +
+            "AND b.pickupDate <= :endDate " +
+            "AND b.dropoffDate >= :startDate")
+    List<Booking> findActiveBookingsForVehicleInDateRange(
+            @Param("vehicleId") Long vehicleId,
+            @Param("statuses") List<Booking.BookingStatus> statuses,
+            @Param("startDate") LocalDateTime startDate,
+            @Param("endDate") LocalDateTime endDate
+    );
+
+    /**
+     * Count active bookings for a vehicle at the current time
+     */
+    @Query("SELECT COUNT(b) FROM Booking b WHERE b.vehicle.id = :vehicleId " +
+            "AND b.bookingStatus IN :statuses " +
+            "AND b.pickupDate <= :currentDate " +
+            "AND b.dropoffDate >= :currentDate")
+    Integer countActiveBookingsForVehicle(
+            @Param("vehicleId") Long vehicleId,
+            @Param("statuses") List<Booking.BookingStatus> statuses,
+            @Param("currentDate") LocalDateTime currentDate
+    );
+
+    /**
+     * Find the next booking date for a vehicle
+     */
+    @Query("SELECT MIN(b.pickupDate) FROM Booking b " +
+            "WHERE b.vehicle.id = :vehicleId " +
+            "AND b.bookingStatus IN :statuses " +
+            "AND b.pickupDate >= :currentDate")
+    LocalDateTime findNextBookingDate(
+            @Param("vehicleId") Long vehicleId,
+            @Param("statuses") List<Booking.BookingStatus> statuses,
+            @Param("currentDate") LocalDateTime currentDate
+    );
+
+    /**
+     * Find the next available date after all current bookings
+     */
+    @Query("SELECT MAX(b.dropoffDate) FROM Booking b " +
+            "WHERE b.vehicle.id = :vehicleId " +
+            "AND b.bookingStatus IN :statuses " +
+            "AND b.dropoffDate >= :currentDate")
+    LocalDateTime findNextAvailableDate(
+            @Param("vehicleId") Long vehicleId,
+            @Param("statuses") List<Booking.BookingStatus> statuses,
+            @Param("currentDate") LocalDateTime currentDate
+    );
+
+    /**
+     * Count bookings by owner and status
+     */
+    Long countByOwnerIdAndBookingStatus(Long ownerId, Booking.BookingStatus status);
+
+    /**
+     * Sum total amount by owner and statuses
+     */
+    @Query("SELECT SUM(b.totalAmount) FROM Booking b " +
+            "WHERE b.owner.id = :ownerId " +
+            "AND b.bookingStatus IN :statuses")
+    Double sumTotalAmountByOwnerIdAndBookingStatusIn(
+            @Param("ownerId") Long ownerId,
+            @Param("statuses") List<Booking.BookingStatus> statuses
+    );
+
+    /**
+     * Get bookings by owner and vehicle with status filter
+     */
+    Page<Booking> findByOwnerIdAndVehicleIdAndBookingStatus(
+            Long ownerId,
+            Long vehicleId,
+            Booking.BookingStatus status,
+            Pageable pageable
+    );
+
+    /**
+     * Get bookings by owner and vehicle
+     */
+    Page<Booking> findByOwnerIdAndVehicleId(
+            Long ownerId,
+            Long vehicleId,
+            Pageable pageable
+    );
+
+    // ═══════════════════════════════════════════════════════════════════════════
     //  ADMIN METHODS - Only what's needed for the admin panel
     // ═══════════════════════════════════════════════════════════════════════════
 

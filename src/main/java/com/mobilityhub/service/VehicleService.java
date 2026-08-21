@@ -424,16 +424,59 @@ public class VehicleService {
         };
     }
 
+    /**
+     * Get owner name with proper fallbacks
+     */
+    private String getOwnerName(User owner) {
+        if (owner == null) {
+            return "Vehicle Owner";
+        }
+
+        // Try full name first
+        if (owner.getFullName() != null && !owner.getFullName().trim().isEmpty()) {
+            return owner.getFullName().trim();
+        }
+
+        // Try username as fallback
+        if (owner.getUsername() != null && !owner.getUsername().trim().isEmpty()) {
+            return owner.getUsername().trim();
+        }
+
+        // Ultimate fallback
+        return "Vehicle Owner";
+    }
+
+    /**
+     * Convert Vehicle entity to VehicleResponseDto with proper owner information
+     */
     private VehicleResponseDto convertToResponseDto(Vehicle vehicle) {
-        long ownerVehicleCount = vehicleRepository.countByOwnerId(vehicle.getOwner().getId());
+        if (vehicle == null) {
+            return null;
+        }
+
+        User owner = vehicle.getOwner();
+
+        // Count owner's vehicles
+        long ownerVehicleCount = 0;
+        if (owner != null) {
+            ownerVehicleCount = vehicleRepository.countByOwnerId(owner.getId());
+        }
         Integer ownerTotalVehicles = (int) ownerVehicleCount;
+
+        // Get owner name with fallbacks
+        String ownerName = getOwnerName(owner);
+        String ownerAvatar = owner != null ? owner.getAvatarUrl() : null;
+        Long ownerId = owner != null ? owner.getId() : null;
+        String ownerEmail = owner != null ? owner.getEmail() : null;
 
         return VehicleResponseDto.builder()
                 .id(vehicle.getId())
-                .ownerId(vehicle.getOwner().getId())
-                .ownerName(vehicle.getOwner().getFullName())
-                .ownerAvatar(vehicle.getOwner().getAvatarUrl())
+                .ownerId(ownerId)
+                .ownerName(ownerName)
+                .ownerEmail(ownerEmail)
+                .ownerAvatar(ownerAvatar)
                 .ownerTotalVehicles(ownerTotalVehicles)
+                .ownerRating(0.0) // You can calculate this if needed
                 .brand(vehicle.getBrand())
                 .model(vehicle.getModel())
                 .year(vehicle.getYear())
