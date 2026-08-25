@@ -1,3 +1,4 @@
+// com/mobilityhub/service/PaymentService.java
 package com.mobilityhub.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -5,7 +6,11 @@ import com.mobilityhub.config.PaymentConfig;
 import com.mobilityhub.dto.response.PaymentInitiateResponse;
 import com.mobilityhub.model.Booking;
 import com.mobilityhub.model.Notification;
+import com.mobilityhub.model.Role;
+import com.mobilityhub.model.User;
+import com.mobilityhub.model.Vehicle;
 import com.mobilityhub.repository.BookingRepository;
+import com.mobilityhub.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.*;
@@ -29,22 +34,26 @@ public class PaymentService {
 
     private final PaymentConfig paymentConfig;
     private final BookingRepository bookingRepository;
+    private final UserRepository userRepository;
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
     private final NotificationService notificationService;
+    private final WalletService walletService;
 
-    /**
-     * Initiate Khalti Payment
-     */
-    public PaymentInitiateResponse initiateKhaltiPayment(Long bookingId, Double amount) {
+    public PaymentInitiateResponse initiateKhaltiPayment(
+            Long bookingId,
+            Double totalAmount,
+            Double serviceFee,
+            Double insuranceFee) {
+
         try {
             Booking booking = bookingRepository.findById(bookingId)
                     .orElseThrow(() -> new RuntimeException("Booking not found"));
 
-            // Convert to paisa (Khalti uses paisa - 1 NPR = 100 paisa)
-            Long amountInPaisa = (long) (amount * 100);
+            Double rentalAmount = totalAmount - serviceFee - insuranceFee;
 
-            // Build Khalti payment request
+            Long amountInPaisa = (long) (totalAmount * 100);
+
             Map<String, Object> requestBody = new HashMap<>();
             requestBody.put("return_url", paymentConfig.getKhalti().getReturnUrl());
             requestBody.put("website_url", paymentConfig.getKhalti().getWebsiteUrl());
@@ -59,14 +68,12 @@ public class PaymentService {
                     booking.getRenter().getPhoneNumber() : "9800000000");
             requestBody.put("customer_info", customerInfo);
 
-            // Prepare headers with your secret key
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("Authorization", "Key " + paymentConfig.getKhalti().getSecretKey());
 
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
 
-            // Make API call to Khalti
             String khaltiUrl = paymentConfig.getKhalti().getBaseUrl() + "/api/v2/epayment/initiate/";
             log.info("Calling Khalti API: {}", khaltiUrl);
 
@@ -84,11 +91,17 @@ public class PaymentService {
 
                 log.info("✅ Khalti payment initiated: pidx={}, paymentUrl={}", pidx, paymentUrl);
 
-                // Update booking with payment info
                 booking.setPaymentId(pidx);
                 booking.setPaymentMethod("KHALTI");
                 booking.setPaymentStatus(Booking.PaymentStatus.PENDING);
+                booking.setTotalAmount(java.math.BigDecimal.valueOf(totalAmount));
+                booking.setServiceFee(java.math.BigDecimal.valueOf(serviceFee));
+                booking.setInsuranceFee(java.math.BigDecimal.valueOf(insuranceFee));
+                booking.setRentalAmount(java.math.BigDecimal.valueOf(rentalAmount));
                 bookingRepository.save(booking);
+
+                log.info("💰 Payment split - Booking {}: Total={}, Rental={}, Service={}, Insurance={}",
+                        bookingId, totalAmount, rentalAmount, serviceFee, insuranceFee);
 
                 return PaymentInitiateResponse.builder()
                         .success(true)
@@ -112,9 +125,80 @@ public class PaymentService {
         }
     }
 
-    /**
-     * Verify Khalti Payment - FIXED to NOT auto-confirm booking
-     */
+    public PaymentInitiateResponse initiateEsewaPayment(
+            Long bookingId,
+            Double totalAmount,
+            Double serviceFee,
+            Double insuranceFee) {
+
+        try {
+            Booking booking = bookingRepository.findById(bookingId)
+                    .orElseThrow(() -> new RuntimeException("Booking not found"));
+
+            Double rentalAmount = totalAmount - serviceFee - insuranceFee;
+
+            String transactionUuid = UUID.randomUUID().toString();
+            String productCode = paymentConfig.getEsewa().getMerchantCode();
+
+            String signature = generateEsewaSignature(
+                    String.valueOf(totalAmount.intValue()),
+                    transactionUuid,
+                    productCode
+            );
+
+            Map<String, String> formData = new HashMap<>();
+            formData.put("amount", String.valueOf(totalAmount.intValue()));
+            formData.put("tax_amount", "0");
+            formData.put("total_amount", String.valueOf(totalAmount.intValue()));
+            formData.put("transaction_uuid", transactionUuid);
+            formData.put("product_code", productCode);
+            formData.put("product_service_charge", "0");
+            formData.put("product_delivery_charge", "0");
+            formData.put("success_url", paymentConfig.getEsewa().getSuccessUrl());
+            formData.put("failure_url", paymentConfig.getEsewa().getFailureUrl());
+            formData.put("signed_field_names", "total_amount,transaction_uuid,product_code");
+            formData.put("signature", signature);
+
+            String paymentUrl = paymentConfig.getEsewa().getBaseUrl() + "/api/epay/main/v2/form";
+
+            booking.setTransactionId(transactionUuid);
+            booking.setPaymentMethod("ESEWA");
+            booking.setPaymentStatus(Booking.PaymentStatus.PENDING);
+            booking.setTotalAmount(java.math.BigDecimal.valueOf(totalAmount));
+            booking.setServiceFee(java.math.BigDecimal.valueOf(serviceFee));
+            booking.setInsuranceFee(java.math.BigDecimal.valueOf(insuranceFee));
+            booking.setRentalAmount(java.math.BigDecimal.valueOf(rentalAmount));
+            bookingRepository.save(booking);
+
+            log.info("✅ eSewa payment initiated: transactionUuid={}", transactionUuid);
+            log.info("💰 Payment split - Booking {}: Total={}, Rental={}, Service={}, Insurance={}",
+                    bookingId, totalAmount, rentalAmount, serviceFee, insuranceFee);
+
+            return PaymentInitiateResponse.builder()
+                    .success(true)
+                    .message("eSewa payment initiated successfully")
+                    .formData(objectMapper.writeValueAsString(formData))
+                    .paymentUrl(paymentUrl)
+                    .transactionId(transactionUuid)
+                    .build();
+
+        } catch (Exception e) {
+            log.error("Error initiating eSewa payment: {}", e.getMessage(), e);
+            return PaymentInitiateResponse.builder()
+                    .success(false)
+                    .message("Error: " + e.getMessage())
+                    .build();
+        }
+    }
+
+    public PaymentInitiateResponse initiateKhaltiPayment(Long bookingId, Double amount) {
+        return initiateKhaltiPayment(bookingId, amount, 0.0, 0.0);
+    }
+
+    public PaymentInitiateResponse initiateEsewaPayment(Long bookingId, Double amount) {
+        return initiateEsewaPayment(bookingId, amount, 0.0, 0.0);
+    }
+
     @Transactional
     public boolean verifyKhaltiPayment(String pidx) {
         try {
@@ -146,22 +230,18 @@ public class PaymentService {
                 Booking booking = bookingRepository.findByPaymentId(pidx)
                         .orElseThrow(() -> new RuntimeException("Booking not found for pidx: " + pidx));
 
-                // Handle all statuses
                 switch (status) {
                     case "Completed":
                         booking.setTransactionId(transactionId);
                         booking.setPaymentStatus(Booking.PaymentStatus.COMPLETED);
                         booking.setPaymentVerifiedAt(LocalDateTime.now());
-                        // ✅ FIX: Don't auto-confirm! Keep pending for owner approval
-                        // booking.setBookingStatus(Booking.BookingStatus.CONFIRMED); // ← REMOVED
 
-                        // Add note for owner
+                        distributePayments(booking, "BOOKING-" + booking.getId());
+
                         booking.setOwnerNotes("Payment completed. Awaiting owner confirmation.");
-
                         bookingRepository.save(booking);
                         log.info("✅ Khalti payment SUCCESSFUL for booking: {} (awaiting owner approval)", booking.getId());
 
-                        // Notify owner that payment is complete and needs approval
                         notificationService.createNotification(
                                 booking.getOwner(),
                                 "💰 Payment Received - Awaiting Your Confirmation",
@@ -171,7 +251,6 @@ public class PaymentService {
                                 booking.getId()
                         );
 
-                        // Notify renter that payment is complete but awaiting owner
                         notificationService.createNotification(
                                 booking.getRenter(),
                                 "✅ Payment Successful!",
@@ -225,93 +304,6 @@ public class PaymentService {
         }
     }
 
-    /**
-     * Initiate eSewa Payment
-     */
-    public PaymentInitiateResponse initiateEsewaPayment(Long bookingId, Double amount) {
-        try {
-            Booking booking = bookingRepository.findById(bookingId)
-                    .orElseThrow(() -> new RuntimeException("Booking not found"));
-
-            String transactionUuid = UUID.randomUUID().toString();
-            String productCode = paymentConfig.getEsewa().getMerchantCode();
-
-            // Generate signature using eSewa secret key
-            String signature = generateEsewaSignature(
-                    String.valueOf(amount.intValue()),
-                    transactionUuid,
-                    productCode
-            );
-
-            // Build form data
-            Map<String, String> formData = new HashMap<>();
-            formData.put("amount", String.valueOf(amount.intValue()));
-            formData.put("tax_amount", "0");
-            formData.put("total_amount", String.valueOf(amount.intValue()));
-            formData.put("transaction_uuid", transactionUuid);
-            formData.put("product_code", productCode);
-            formData.put("product_service_charge", "0");
-            formData.put("product_delivery_charge", "0");
-            formData.put("success_url", paymentConfig.getEsewa().getSuccessUrl());
-            formData.put("failure_url", paymentConfig.getEsewa().getFailureUrl());
-            formData.put("signed_field_names", "total_amount,transaction_uuid,product_code");
-            formData.put("signature", signature);
-
-            String paymentUrl = paymentConfig.getEsewa().getBaseUrl() + "/api/epay/main/v2/form";
-
-            // Update booking
-            booking.setTransactionId(transactionUuid);
-            booking.setPaymentMethod("ESEWA");
-            booking.setPaymentStatus(Booking.PaymentStatus.PENDING);
-            bookingRepository.save(booking);
-
-            log.info("✅ eSewa payment initiated: transactionUuid={}", transactionUuid);
-
-            return PaymentInitiateResponse.builder()
-                    .success(true)
-                    .message("eSewa payment initiated successfully")
-                    .formData(objectMapper.writeValueAsString(formData))
-                    .paymentUrl(paymentUrl)
-                    .transactionId(transactionUuid)
-                    .build();
-
-        } catch (Exception e) {
-            log.error("Error initiating eSewa payment: {}", e.getMessage(), e);
-            return PaymentInitiateResponse.builder()
-                    .success(false)
-                    .message("Error: " + e.getMessage())
-                    .build();
-        }
-    }
-
-    /**
-     * Generate eSewa Signature (HMAC-SHA256)
-     */
-    private String generateEsewaSignature(String totalAmount, String transactionUuid, String productCode) {
-        try {
-            String message = "total_amount=" + totalAmount +
-                    ",transaction_uuid=" + transactionUuid +
-                    ",product_code=" + productCode;
-
-            Mac hmacSha256 = Mac.getInstance("HmacSHA256");
-            SecretKeySpec secretKey = new SecretKeySpec(
-                    paymentConfig.getEsewa().getSecretKey().getBytes(StandardCharsets.UTF_8),
-                    "HmacSHA256"
-            );
-            hmacSha256.init(secretKey);
-            byte[] hmacBytes = hmacSha256.doFinal(message.getBytes(StandardCharsets.UTF_8));
-
-            return Base64.getEncoder().encodeToString(hmacBytes);
-
-        } catch (Exception e) {
-            log.error("Error generating eSewa signature: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to generate eSewa signature");
-        }
-    }
-
-    /**
-     * Verify eSewa Payment - FIXED to NOT auto-confirm booking
-     */
     @Transactional
     public boolean verifyEsewaPayment(String transactionUuid) {
         try {
@@ -344,21 +336,29 @@ public class PaymentService {
 
                     booking.setPaymentStatus(Booking.PaymentStatus.COMPLETED);
                     booking.setPaymentVerifiedAt(LocalDateTime.now());
-                    // ✅ FIX: Don't auto-confirm! Keep pending for owner approval
-                    // booking.setBookingStatus(Booking.BookingStatus.CONFIRMED); // ← REMOVED
+
+                    distributePayments(booking, "BOOKING-" + booking.getId());
 
                     booking.setOwnerNotes("Payment completed. Awaiting owner confirmation.");
                     bookingRepository.save(booking);
 
                     log.info("✅ eSewa payment verified: transactionUuid={} (awaiting owner approval)", transactionUuid);
 
-                    // Notify owner
                     notificationService.createNotification(
                             booking.getOwner(),
                             "💰 Payment Received - Awaiting Your Confirmation",
                             "Renter has paid for booking " + booking.getBookingReference() +
                                     ". Please review and confirm the booking.",
                             Notification.NotificationType.PAYMENT_RECEIVED,
+                            booking.getId()
+                    );
+
+                    notificationService.createNotification(
+                            booking.getRenter(),
+                            "✅ Payment Successful!",
+                            "Your payment for " + booking.getVehicle().getBrand() + " " +
+                                    booking.getVehicle().getModel() + " is complete. Waiting for owner to confirm your booking.",
+                            Notification.NotificationType.BOOKING_SUBMITTED,
                             booking.getId()
                     );
 
@@ -374,9 +374,6 @@ public class PaymentService {
         }
     }
 
-    /**
-     * Handle eSewa Callback - FIXED to NOT auto-confirm booking
-     */
     @Transactional
     public boolean handleEsewaCallback(Map<String, String> callbackData) {
         try {
@@ -390,7 +387,6 @@ public class PaymentService {
                 return false;
             }
 
-            // Verify signature
             String expectedSignature = generateEsewaSignature(
                     totalAmount,
                     transactionUuid,
@@ -408,21 +404,29 @@ public class PaymentService {
 
                 booking.setPaymentStatus(Booking.PaymentStatus.COMPLETED);
                 booking.setPaymentVerifiedAt(LocalDateTime.now());
-                // ✅ FIX: Don't auto-confirm! Keep pending for owner approval
-                // booking.setBookingStatus(Booking.BookingStatus.CONFIRMED); // ← REMOVED
+
+                distributePayments(booking, "BOOKING-" + booking.getId());
 
                 booking.setOwnerNotes("Payment completed. Awaiting owner confirmation.");
                 bookingRepository.save(booking);
 
                 log.info("✅ eSewa payment successful: transactionUuid={} (awaiting owner approval)", transactionUuid);
 
-                // Notify owner
                 notificationService.createNotification(
                         booking.getOwner(),
                         "💰 Payment Received - Awaiting Your Confirmation",
                         "Renter has paid for booking " + booking.getBookingReference() +
                                 ". Please review and confirm the booking.",
                         Notification.NotificationType.PAYMENT_RECEIVED,
+                        booking.getId()
+                );
+
+                notificationService.createNotification(
+                        booking.getRenter(),
+                        "✅ Payment Successful!",
+                        "Your payment for " + booking.getVehicle().getBrand() + " " +
+                                booking.getVehicle().getModel() + " is complete. Waiting for owner to confirm your booking.",
+                        Notification.NotificationType.BOOKING_SUBMITTED,
                         booking.getId()
                 );
 
@@ -434,6 +438,83 @@ public class PaymentService {
         } catch (Exception e) {
             log.error("Error handling eSewa callback: {}", e.getMessage(), e);
             return false;
+        }
+    }
+
+    private String generateEsewaSignature(String totalAmount, String transactionUuid, String productCode) {
+        try {
+            String message = "total_amount=" + totalAmount +
+                    ",transaction_uuid=" + transactionUuid +
+                    ",product_code=" + productCode;
+
+            Mac hmacSha256 = Mac.getInstance("HmacSHA256");
+            SecretKeySpec secretKey = new SecretKeySpec(
+                    paymentConfig.getEsewa().getSecretKey().getBytes(StandardCharsets.UTF_8),
+                    "HmacSHA256"
+            );
+            hmacSha256.init(secretKey);
+            byte[] hmacBytes = hmacSha256.doFinal(message.getBytes(StandardCharsets.UTF_8));
+
+            return Base64.getEncoder().encodeToString(hmacBytes);
+
+        } catch (Exception e) {
+            log.error("Error generating eSewa signature: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to generate eSewa signature");
+        }
+    }
+
+    /**
+     * ✅ CORRECT: Distribute payments between admin and vehicle owner
+     * Service Fee → Admin
+     * Rental Amount + Insurance Fee → Vehicle Owner
+     */
+    @Transactional
+    private void distributePayments(Booking booking, String referenceId) {
+        try {
+            Vehicle vehicle = booking.getVehicle();
+            User owner = vehicle.getOwner();
+
+            User admin = userRepository.findByRole(Role.ADMIN)
+                    .stream()
+                    .findFirst()
+                    .orElseThrow(() -> new RuntimeException("Admin user not found in database."));
+
+            Double serviceFee = booking.getServiceFee() != null ?
+                    booking.getServiceFee().doubleValue() : 0.0;
+            Double insuranceFee = booking.getInsuranceFee() != null ?
+                    booking.getInsuranceFee().doubleValue() : 0.0;
+            Double rentalAmount = booking.getRentalAmount() != null ?
+                    booking.getRentalAmount().doubleValue() : 0.0;
+
+            // Admin gets ONLY Service Fee
+            Double adminAmount = serviceFee;
+
+            // Owner gets Rental Amount + Insurance Fee
+            Double ownerAmount = rentalAmount + insuranceFee;
+
+            if (adminAmount > 0) {
+                walletService.addBalance(admin.getId(), adminAmount,
+                        "Service fee for booking: " + booking.getBookingReference() +
+                                " (ID: " + booking.getId() + ")",
+                        referenceId);
+                log.info("💰 Added ₹{} to Admin wallet (Service Fee)", adminAmount);
+            }
+
+            if (ownerAmount > 0) {
+                walletService.addBalance(owner.getId(), ownerAmount,
+                        "Rental + Insurance payment for booking: " + booking.getBookingReference() +
+                                " (ID: " + booking.getId() + ")",
+                        referenceId);
+                log.info("💰 Added ₹{} to Owner wallet (Rental: ₹{}, Insurance: ₹{})",
+                        ownerAmount, rentalAmount, insuranceFee);
+            }
+
+            log.info("💰 Payment distributed - Booking {}: Admin ₹{}, Owner ₹{} (Rental + Insurance)",
+                    booking.getId(), adminAmount, ownerAmount);
+
+        } catch (Exception e) {
+            log.error("Error distributing payments for booking {}: {}", booking.getId(), e.getMessage(), e);
+            throw new RuntimeException("Failed to distribute payments: " + e.getMessage());
         }
     }
 }

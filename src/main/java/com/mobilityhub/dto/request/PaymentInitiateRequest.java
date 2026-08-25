@@ -17,5 +17,13 @@ public class PaymentInitiateRequest {
     private BigDecimal amount;
 
     @NotNull
+    @Positive
+    private BigDecimal serviceFee;
+
+    @NotNull
+    @Positive
+    private BigDecimal insuranceFee;
+
+    @NotNull
     private String paymentMethod; // "ESEWA" or "KHALTI"
 }

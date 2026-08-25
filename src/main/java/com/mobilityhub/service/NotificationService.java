@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -22,27 +23,73 @@ public class NotificationService {
 
     private final NotificationRepository notificationRepository;
 
+    // Lock map to prevent concurrent duplicate notifications
+    private final ConcurrentHashMap<String, Object> notificationLocks = new ConcurrentHashMap<>();
+
     /**
-     * Create notification for a single user
+     * Create notification for a single user with duplicate prevention
      */
     @Transactional
     public void createNotification(User user, String title, String message,
                                    Notification.NotificationType type, Long relatedId) {
-        Notification notification = Notification.builder()
-                .user(user)
-                .title(title)
-                .message(message)
-                .type(type)
-                .status(Notification.NotificationStatus.UNREAD)
-                .relatedId(relatedId)
-                .build();
 
-        notificationRepository.save(notification);
-        log.info("Notification created for user {}: {}", user.getUsername(), title);
+        // Create a unique key for this notification
+        String lockKey = user.getId() + "_" + type.name() + "_" + relatedId;
+
+        synchronized (notificationLocks.computeIfAbsent(lockKey, k -> new Object())) {
+            try {
+                // Check for duplicate notification within last 10 seconds
+                LocalDateTime checkTime = LocalDateTime.now().minusSeconds(10);
+
+                // Check if a similar notification already exists recently
+                boolean duplicateExists = notificationRepository.existsByUserIdAndTypeAndRelatedIdAndCreatedAtAfter(
+                        user.getId(),
+                        type,
+                        relatedId,
+                        checkTime
+                );
+
+                if (duplicateExists) {
+                    log.info("Duplicate notification prevented for user {}: {}", user.getUsername(), title);
+                    return;
+                }
+
+                // Also check by exact title and message for extra safety
+                boolean exactDuplicateExists = notificationRepository.existsByUserIdAndTitleAndMessageAndTypeAndRelatedIdAndCreatedAtAfter(
+                        user.getId(),
+                        title,
+                        message,
+                        type,
+                        relatedId,
+                        checkTime
+                );
+
+                if (exactDuplicateExists) {
+                    log.info("Exact duplicate notification prevented for user {}: {}", user.getUsername(), title);
+                    return;
+                }
+
+                Notification notification = Notification.builder()
+                        .user(user)
+                        .title(title)
+                        .message(message)
+                        .type(type)
+                        .status(Notification.NotificationStatus.UNREAD)
+                        .relatedId(relatedId)
+                        .build();
+
+                notificationRepository.save(notification);
+                log.info("Notification created for user {}: {}", user.getUsername(), title);
+
+            } finally {
+                // Clean up the lock after a delay
+                cleanupLock(lockKey);
+            }
+        }
     }
 
     /**
-     * Create notification for multiple users
+     * Create notification for multiple users with duplicate prevention
      */
     @Transactional
     public void createNotificationForUsers(List<User> users, String title, String message,
@@ -51,19 +98,55 @@ public class NotificationService {
             return;
         }
 
-        List<Notification> notifications = users.stream()
-                .map(user -> Notification.builder()
-                        .user(user)
-                        .title(title)
-                        .message(message)
-                        .type(type)
-                        .status(Notification.NotificationStatus.UNREAD)
-                        .relatedId(relatedId)
-                        .build())
-                .collect(Collectors.toList());
+        List<Notification> notificationsToSave = new ArrayList<>();
+        LocalDateTime checkTime = LocalDateTime.now().minusSeconds(10);
 
-        notificationRepository.saveAll(notifications);
-        log.info("Created {} notifications for {} users", notifications.size(), users.size());
+        for (User user : users) {
+            // Check for duplicate for each user
+            boolean duplicateExists = notificationRepository.existsByUserIdAndTitleAndMessageAndTypeAndRelatedIdAndCreatedAtAfter(
+                    user.getId(),
+                    title,
+                    message,
+                    type,
+                    relatedId,
+                    checkTime
+            );
+
+            if (!duplicateExists) {
+                notificationsToSave.add(
+                        Notification.builder()
+                                .user(user)
+                                .title(title)
+                                .message(message)
+                                .type(type)
+                                .status(Notification.NotificationStatus.UNREAD)
+                                .relatedId(relatedId)
+                                .build()
+                );
+            }
+        }
+
+        if (!notificationsToSave.isEmpty()) {
+            notificationRepository.saveAll(notificationsToSave);
+            log.info("Created {} new notifications for {} users", notificationsToSave.size(), users.size());
+        } else {
+            log.info("All notifications were duplicates, skipped saving");
+        }
+    }
+
+    /**
+     * Clean up the lock after a delay
+     */
+    private void cleanupLock(String lockKey) {
+        new Thread(() -> {
+            try {
+                Thread.sleep(5000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                notificationLocks.remove(lockKey);
+            }
+        }).start();
     }
 
     /**
@@ -141,6 +224,27 @@ public class NotificationService {
         return notifications.stream()
                 .map(this::mapToDto)
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Delete duplicate notifications for cleanup
+     */
+    @Transactional
+    public void deleteDuplicateNotifications(Long relatedId, Notification.NotificationType type) {
+        List<Notification> notifications = notificationRepository.findByRelatedIdAndType(relatedId, type);
+
+        if (notifications.size() <= 1) {
+            return;
+        }
+
+        // Keep the first one, delete the rest
+        Notification first = notifications.get(0);
+        for (int i = 1; i < notifications.size(); i++) {
+            notificationRepository.delete(notifications.get(i));
+        }
+
+        log.info("Deleted {} duplicate notifications for relatedId: {}, type: {}",
+                notifications.size() - 1, relatedId, type);
     }
 
     private NotificationResponseDto mapToDto(Notification notification) {

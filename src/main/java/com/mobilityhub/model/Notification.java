@@ -1,4 +1,4 @@
-// model/Notification.java
+// com/mobilityhub/model/Notification.java
 package com.mobilityhub.model;
 
 import jakarta.persistence.*;
@@ -71,6 +71,10 @@ public class Notification {
         BOOKING_REJECTED,
         BOOKING_CANCELLED,
         BOOKING_COMPLETED,
+
+        // Trip Management
+        TRIP_ENDED_AWAITING_CONFIRMATION,
+        VEHICLE_RETURN_CONFIRMED,
 
         PAYMENT_RECEIVED
     }

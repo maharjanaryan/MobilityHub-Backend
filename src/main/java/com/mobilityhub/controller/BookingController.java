@@ -2,6 +2,7 @@ package com.mobilityhub.controller;
 
 import com.mobilityhub.dto.request.BookingActionRequestDto;
 import com.mobilityhub.dto.request.BookingRequestDto;
+import com.mobilityhub.dto.request.ConfirmReturnRequestDto;
 import com.mobilityhub.dto.response.BookingResponseDto;
 import com.mobilityhub.dto.response.VehicleAvailabilityStatusDto;
 import com.mobilityhub.dto.response.VehicleBookingStatusDto;
@@ -192,6 +193,21 @@ public class BookingController {
         UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
         log.info("User {} ending trip for booking {}", userDetails.getId(), bookingId);
         return ResponseEntity.ok(bookingService.endTrip(bookingId, userDetails.getId()));
+    }
+
+    // ─────────────────────────────────────────────
+    // CONFIRM VEHICLE RETURN (NEW ENDPOINT)
+    // ─────────────────────────────────────────────
+
+    @PostMapping("/{bookingId}/confirm-return")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<BookingResponseDto> confirmVehicleReturn(
+            @PathVariable Long bookingId,
+            @RequestBody @Valid ConfirmReturnRequestDto request,
+            Authentication authentication) {
+        UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
+        log.info("User {} confirming vehicle return for booking {}", userDetails.getId(), bookingId);
+        return ResponseEntity.ok(bookingService.confirmVehicleReturn(bookingId, userDetails.getId(), request));
     }
 
     // ─────────────────────────────────────────────

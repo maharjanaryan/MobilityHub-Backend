@@ -38,14 +38,18 @@ public class PaymentController {
         if ("KHALTI".equalsIgnoreCase(request.getPaymentMethod())) {
             PaymentInitiateResponse response = paymentService.initiateKhaltiPayment(
                     request.getBookingId(),
-                    request.getAmount().doubleValue()
+                    request.getAmount().doubleValue(),
+                    request.getServiceFee().doubleValue(),
+                    request.getInsuranceFee().doubleValue()
             );
             return ResponseEntity.ok(response);
 
         } else if ("ESEWA".equalsIgnoreCase(request.getPaymentMethod())) {
             PaymentInitiateResponse response = paymentService.initiateEsewaPayment(
                     request.getBookingId(),
-                    request.getAmount().doubleValue()
+                    request.getAmount().doubleValue(),
+                    request.getServiceFee().doubleValue(),
+                    request.getInsuranceFee().doubleValue()
             );
             return ResponseEntity.ok(response);
         }

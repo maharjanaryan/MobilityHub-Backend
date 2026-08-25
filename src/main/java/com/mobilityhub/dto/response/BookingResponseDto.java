@@ -25,7 +25,7 @@ public class BookingResponseDto {
     private String vehicleImage;
     private String vehicleBrand;
     private String vehicleModel;
-    private List<String> vehicleBluebookDocuments; // ADDED - Bluebook documents
+    private List<String> vehicleBluebookDocuments;
 
     // Owner info
     private Long ownerId;
@@ -39,7 +39,7 @@ public class BookingResponseDto {
     private String renterEmail;
     private String renterPhone;
 
-    // Renter Location (ONLY LOCATION FIELD)
+    // Renter Location
     private String renterLocation;
     private Double renterLatitude;
     private Double renterLongitude;
@@ -70,6 +70,14 @@ public class BookingResponseDto {
     // Trip
     private LocalDateTime tripStartedAt;
     private LocalDateTime tripEndedAt;
+
+    // Vehicle Return Confirmation
+    private LocalDateTime vehicleReturnedAt;
+    private Boolean vehicleDamaged;
+    private String damageNotes;
+    private Boolean securityDepositReturned;
+    private LocalDateTime securityDepositReturnedAt;
+    private BigDecimal securityDepositReturnedAmount;
 
     // Timestamps
     private LocalDateTime createdAt;

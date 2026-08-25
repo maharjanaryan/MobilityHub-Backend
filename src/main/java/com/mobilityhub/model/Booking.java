@@ -54,6 +54,15 @@ public class Booking {
     @Column(name = "total_amount", nullable = false)
     private BigDecimal totalAmount;
 
+    @Column(name = "service_fee")
+    private BigDecimal serviceFee;
+
+    @Column(name = "insurance_fee")
+    private BigDecimal insuranceFee;
+
+    @Column(name = "rental_amount")
+    private BigDecimal rentalAmount;
+
     @Column(name = "security_deposit")
     private BigDecimal securityDeposit;
 
@@ -126,6 +135,28 @@ public class Booking {
     @Column(name = "trip_ended_at")
     private LocalDateTime tripEndedAt;
 
+    // ─────────────────────────────────────────────
+    // VEHICLE RETURN CONFIRMATION FIELDS
+    // ─────────────────────────────────────────────
+
+    @Column(name = "vehicle_returned_at")
+    private LocalDateTime vehicleReturnedAt;
+
+    @Column(name = "vehicle_damaged")
+    private Boolean vehicleDamaged;
+
+    @Column(name = "damage_notes", length = 1000)
+    private String damageNotes;
+
+    @Column(name = "security_deposit_returned")
+    private Boolean securityDepositReturned;
+
+    @Column(name = "security_deposit_returned_at")
+    private LocalDateTime securityDepositReturnedAt;
+
+    @Column(name = "security_deposit_returned_amount")
+    private BigDecimal securityDepositReturnedAmount;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
@@ -138,6 +169,7 @@ public class Booking {
         PENDING,
         CONFIRMED,
         ACTIVE,
+        AWAITING_RETURN_CONFIRMATION,
         COMPLETED,
         CANCELLED,
         REJECTED,

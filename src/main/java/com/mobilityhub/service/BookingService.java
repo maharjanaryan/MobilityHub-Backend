@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mobilityhub.dto.request.BookingActionRequestDto;
 import com.mobilityhub.dto.request.BookingRequestDto;
+import com.mobilityhub.dto.request.ConfirmReturnRequestDto;
 import com.mobilityhub.dto.response.BookingResponseDto;
 import com.mobilityhub.dto.response.BookingSummaryDto;
 import com.mobilityhub.dto.response.VehicleAvailabilityStatusDto;
@@ -51,7 +52,7 @@ public class BookingService {
     }
 
     // ─────────────────────────────────────────────
-    // CREATE BOOKING (WITH RENTER LOCATION ONLY)
+    // CREATE BOOKING
     // ─────────────────────────────────────────────
 
     @Transactional
@@ -131,7 +132,6 @@ public class BookingService {
 
         String bookingReference = generateBookingReference();
 
-        // Build booking with renter location only
         Booking booking = Booking.builder()
                 .bookingReference(bookingReference)
                 .renter(renter)
@@ -150,7 +150,6 @@ public class BookingService {
                 .paymentMethod(request.getPaymentMethod())
                 .driverName(request.getDriverName())
                 .driverLicenseNumber(request.getDriverLicenseNumber())
-                // Renter location fields only
                 .renterLocation(request.getRenterLocation())
                 .renterLatitude(request.getRenterLatitude())
                 .renterLongitude(request.getRenterLongitude())
@@ -159,7 +158,6 @@ public class BookingService {
         Booking saved = bookingRepository.save(booking);
         log.info("Booking created: {} with renter location: {}", bookingReference, request.getRenterLocation());
 
-        // Notifications
         notificationService.createNotification(
                 vehicle.getOwner(),
                 "New Booking Request",
@@ -372,17 +370,131 @@ public class BookingService {
             throw new RuntimeException("Only active trips can be ended. Current status: " + booking.getBookingStatus());
         }
 
-        booking.setBookingStatus(Booking.BookingStatus.COMPLETED);
+        // Set to AWAITING_RETURN_CONFIRMATION instead of COMPLETED
+        booking.setBookingStatus(Booking.BookingStatus.AWAITING_RETURN_CONFIRMATION);
         booking.setTripEndedAt(LocalDateTime.now());
         Booking saved = bookingRepository.save(booking);
 
-        log.info("🏁 Trip ended for booking {} by user {}", bookingId, userId);
+        log.info("🏁 Trip ended for booking {} by user {}, awaiting owner confirmation", bookingId, userId);
 
+        // Notify owner - they need to confirm return
+        notificationService.createNotification(
+                booking.getOwner(),
+                "🚗 Trip Ended - Confirm Vehicle Return",
+                String.format(
+                        "%s has ended the trip with your vehicle %s %s (%s). Please inspect the vehicle and confirm return to release the security deposit.",
+                        booking.getRenter().getFullName(),
+                        booking.getVehicle().getBrand(),
+                        booking.getVehicle().getModel(),
+                        booking.getVehicle().getLicensePlate()
+                ),
+                Notification.NotificationType.TRIP_ENDED_AWAITING_CONFIRMATION,
+                booking.getId()
+        );
+
+        // Notify renter - waiting for owner confirmation
         notificationService.createNotification(
                 booking.getRenter(),
-                "Trip Completed! ✅",
-                "Your trip with " + booking.getVehicle().getBrand() + " " + booking.getVehicle().getModel() + " has been completed. Thank you for using our service!",
-                Notification.NotificationType.BOOKING_COMPLETED,
+                "Trip Ended - Awaiting Owner Confirmation",
+                String.format(
+                        "You have ended your trip with %s %s. The owner needs to inspect and confirm the vehicle return. You'll receive your security deposit once confirmed.",
+                        booking.getVehicle().getBrand(),
+                        booking.getVehicle().getModel()
+                ),
+                Notification.NotificationType.TRIP_ENDED_AWAITING_CONFIRMATION,
+                booking.getId()
+        );
+
+        return mapToResponseDto(saved);
+    }
+
+    // ─────────────────────────────────────────────
+    // CONFIRM VEHICLE RETURN
+    // ─────────────────────────────────────────────
+
+    @Transactional
+    public BookingResponseDto confirmVehicleReturn(Long bookingId, Long ownerId, ConfirmReturnRequestDto request) {
+        if (!hasVerifiedOwnerKyc(ownerId)) {
+            throw new RuntimeException("Owner KYC verification required to confirm vehicle return");
+        }
+
+        Booking booking = bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new RuntimeException("Booking not found"));
+
+        if (!booking.getOwner().getId().equals(ownerId)) {
+            throw new RuntimeException("Only the vehicle owner can confirm vehicle return");
+        }
+
+        if (booking.getBookingStatus() != Booking.BookingStatus.AWAITING_RETURN_CONFIRMATION) {
+            throw new RuntimeException("Cannot confirm return. Booking status is: " + booking.getBookingStatus());
+        }
+
+        // Mark as completed
+        booking.setBookingStatus(Booking.BookingStatus.COMPLETED);
+        booking.setVehicleReturnedAt(LocalDateTime.now());
+
+        // Handle damage report
+        Boolean isDamaged = request.getVehicleDamaged() != null && request.getVehicleDamaged();
+        booking.setVehicleDamaged(isDamaged);
+        booking.setDamageNotes(request.getDamageNotes());
+
+        // Security deposit handling
+        if (!isDamaged) {
+            // Full security deposit returned
+            booking.setSecurityDepositReturned(true);
+            booking.setSecurityDepositReturnedAt(LocalDateTime.now());
+            booking.setSecurityDepositReturnedAmount(booking.getSecurityDeposit());
+
+            log.info("✅ Security deposit of Rs. {} released for booking {}", booking.getSecurityDeposit(), bookingId);
+        } else {
+            // Damaged - deposit not returned (or partial)
+            booking.setSecurityDepositReturned(false);
+            log.info("⚠️ Security deposit held for booking {} due to damage: {}", bookingId, request.getDamageNotes());
+        }
+
+        Booking saved = bookingRepository.save(booking);
+
+        log.info("✅ Vehicle return confirmed for booking {} by owner {}", bookingId, ownerId);
+
+        // Notify renter
+        if (!isDamaged) {
+            notificationService.createNotification(
+                    booking.getRenter(),
+                    "✅ Vehicle Return Confirmed - Deposit Released",
+                    String.format(
+                            "The owner has confirmed the return of %s %s. Your security deposit of Rs. %.2f has been released to your account.",
+                            booking.getVehicle().getBrand(),
+                            booking.getVehicle().getModel(),
+                            booking.getSecurityDeposit()
+                    ),
+                    Notification.NotificationType.VEHICLE_RETURN_CONFIRMED,
+                    booking.getId()
+            );
+        } else {
+            notificationService.createNotification(
+                    booking.getRenter(),
+                    "⚠️ Vehicle Return Confirmed - Deposit On Hold",
+                    String.format(
+                            "The owner has confirmed the return of %s %s but reported damage. Your security deposit will be held for damage assessment. Reason: %s",
+                            booking.getVehicle().getBrand(),
+                            booking.getVehicle().getModel(),
+                            request.getDamageNotes() != null ? request.getDamageNotes() : "No details provided"
+                    ),
+                    Notification.NotificationType.VEHICLE_RETURN_CONFIRMED,
+                    booking.getId()
+            );
+        }
+
+        // Also notify owner that confirmation is complete
+        notificationService.createNotification(
+                booking.getOwner(),
+                "✅ Vehicle Return Confirmed",
+                String.format(
+                        "You have successfully confirmed the return of %s %s. The booking is now completed.",
+                        booking.getVehicle().getBrand(),
+                        booking.getVehicle().getModel()
+                ),
+                Notification.NotificationType.VEHICLE_RETURN_CONFIRMED,
                 booking.getId()
         );
 
@@ -486,7 +598,8 @@ public class BookingService {
         LocalDateTime now = LocalDateTime.now();
         List<Booking.BookingStatus> activeStatuses = List.of(
                 Booking.BookingStatus.CONFIRMED,
-                Booking.BookingStatus.ACTIVE
+                Booking.BookingStatus.ACTIVE,
+                Booking.BookingStatus.AWAITING_RETURN_CONFIRMATION
         );
 
         return ownerVehicles.stream()
@@ -552,7 +665,8 @@ public class BookingService {
         List<Booking.BookingStatus> relevantStatuses = List.of(
                 Booking.BookingStatus.PENDING,
                 Booking.BookingStatus.CONFIRMED,
-                Booking.BookingStatus.ACTIVE
+                Booking.BookingStatus.ACTIVE,
+                Booking.BookingStatus.AWAITING_RETURN_CONFIRMATION
         );
 
         return ownerVehicles.stream()
@@ -660,7 +774,8 @@ public class BookingService {
         LocalDateTime now = LocalDateTime.now();
         List<Booking.BookingStatus> activeStatuses = List.of(
                 Booking.BookingStatus.CONFIRMED,
-                Booking.BookingStatus.ACTIVE
+                Booking.BookingStatus.ACTIVE,
+                Booking.BookingStatus.AWAITING_RETURN_CONFIRMATION
         );
 
         long currentlyBookedVehicles = ownerVehicles.stream()
@@ -682,6 +797,9 @@ public class BookingService {
         );
         long activeBookings = bookingRepository.countByOwnerIdAndBookingStatus(
                 ownerId, Booking.BookingStatus.ACTIVE
+        );
+        long awaitingReturnBookings = bookingRepository.countByOwnerIdAndBookingStatus(
+                ownerId, Booking.BookingStatus.AWAITING_RETURN_CONFIRMATION
         );
         long completedBookings = bookingRepository.countByOwnerIdAndBookingStatus(
                 ownerId, Booking.BookingStatus.COMPLETED
@@ -710,6 +828,7 @@ public class BookingService {
         summary.put("pendingBookings", pendingBookings);
         summary.put("confirmedBookings", confirmedBookings);
         summary.put("activeBookings", activeBookings);
+        summary.put("awaitingReturnBookings", awaitingReturnBookings);
         summary.put("completedBookings", completedBookings);
         summary.put("cancelledBookings", cancelledBookings);
         summary.put("rejectedBookings", rejectedBookings);
@@ -751,6 +870,7 @@ public class BookingService {
         long pendingBookings = bookingRepository.countByBookingStatus(Booking.BookingStatus.PENDING);
         long confirmedBookings = bookingRepository.countByBookingStatus(Booking.BookingStatus.CONFIRMED);
         long activeBookings = bookingRepository.countByBookingStatus(Booking.BookingStatus.ACTIVE);
+        long awaitingReturnBookings = bookingRepository.countByBookingStatus(Booking.BookingStatus.AWAITING_RETURN_CONFIRMATION);
         long completedBookings = bookingRepository.countByBookingStatus(Booking.BookingStatus.COMPLETED);
         long cancelledBookings = bookingRepository.countByBookingStatus(Booking.BookingStatus.CANCELLED);
         long rejectedBookings = bookingRepository.countByBookingStatus(Booking.BookingStatus.REJECTED);
@@ -764,6 +884,7 @@ public class BookingService {
         stats.put("pending", pendingBookings);
         stats.put("confirmed", confirmedBookings);
         stats.put("ongoing", activeBookings);
+        stats.put("awaitingReturn", awaitingReturnBookings);
         stats.put("completed", completedBookings);
         stats.put("cancelled", cancelledBookings);
         stats.put("rejected", rejectedBookings);
@@ -987,13 +1108,12 @@ public class BookingService {
     }
 
     // ─────────────────────────────────────────────
-    // MAP TO RESPONSE DTO (WITH BLUEBOOK DOCUMENTS)
+    // MAP TO RESPONSE DTO
     // ─────────────────────────────────────────────
 
     private BookingResponseDto mapToResponseDto(Booking b) {
         Vehicle v = b.getVehicle();
 
-        // Parse bluebook documents from vehicle
         List<String> bluebookDocuments = new ArrayList<>();
         if (v.getBluebookDocument() != null && !v.getBluebookDocument().isEmpty()) {
             try {
@@ -1014,7 +1134,7 @@ public class BookingService {
                 .vehicleBrand(v.getBrand())
                 .vehicleModel(v.getModel())
                 .vehicleImage(getFirstPhotoUrl(v))
-                .vehicleBluebookDocuments(bluebookDocuments) // ADDED - Bluebook documents
+                .vehicleBluebookDocuments(bluebookDocuments)
                 .ownerId(b.getOwner().getId())
                 .ownerName(b.getOwner().getFullName())
                 .ownerEmail(b.getOwner().getEmail())
@@ -1023,7 +1143,6 @@ public class BookingService {
                 .renterName(b.getRenter().getFullName())
                 .renterEmail(b.getRenter().getEmail())
                 .renterPhone(b.getRenter().getPhoneNumber())
-                // Renter location only
                 .renterLocation(b.getRenterLocation())
                 .renterLatitude(b.getRenterLatitude())
                 .renterLongitude(b.getRenterLongitude())
@@ -1042,6 +1161,12 @@ public class BookingService {
                 .ownerNotes(b.getOwnerNotes())
                 .tripStartedAt(b.getTripStartedAt())
                 .tripEndedAt(b.getTripEndedAt())
+                .vehicleReturnedAt(b.getVehicleReturnedAt())
+                .vehicleDamaged(b.getVehicleDamaged())
+                .damageNotes(b.getDamageNotes())
+                .securityDepositReturned(b.getSecurityDepositReturned())
+                .securityDepositReturnedAt(b.getSecurityDepositReturnedAt())
+                .securityDepositReturnedAmount(b.getSecurityDepositReturnedAmount())
                 .createdAt(b.getCreatedAt())
                 .approvedAt(b.getApprovedAt())
                 .updatedAt(b.getUpdatedAt())

@@ -1,4 +1,4 @@
-// model/User.java
+// com/mobilityhub/model/User.java
 package com.mobilityhub.model;
 
 import jakarta.persistence.*;
@@ -57,7 +57,7 @@ public class User implements UserDetails {
     @Column(name = "avatar_url")
     private String avatarUrl;
 
-    // Base64 avatar storage (no file controller needed)
+    // Base64 avatar storage
     @Lob
     @Column(name = "avatar_base64", columnDefinition = "LONGTEXT")
     private String avatarBase64;
@@ -66,7 +66,7 @@ public class User implements UserDetails {
     private boolean isOAuthUser = false;
 
     @Enumerated(EnumType.STRING)
-    private Role role;
+    private Role role;  // Using the separate Role enum
 
     @Column(name = "is_active")
     private boolean isActive = true;
@@ -95,10 +95,17 @@ public class User implements UserDetails {
     @Column(name = "last_login")
     private LocalDateTime lastLogin;
 
+    // Wallet balance field
+    @Column(name = "balance", columnDefinition = "DOUBLE DEFAULT 0.0")
+    private Double balance = 0.0;
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
         updatedAt = LocalDateTime.now();
+        if (balance == null) {
+            balance = 0.0;
+        }
     }
 
     @PreUpdate
