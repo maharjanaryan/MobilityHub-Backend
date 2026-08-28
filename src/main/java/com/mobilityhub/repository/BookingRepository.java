@@ -45,12 +45,9 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     Optional<Booking> findByTransactionId(String transactionId);
 
     // ═══════════════════════════════════════════════════════════════════════════
-    //  NEW METHODS FOR OWNER VEHICLE STATUS
+    //  OWNER VEHICLE STATUS METHODS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /**
-     * Get active bookings for a vehicle within a date range
-     */
     @Query("SELECT b FROM Booking b WHERE b.vehicle.id = :vehicleId " +
             "AND b.bookingStatus IN :statuses " +
             "AND b.pickupDate <= :endDate " +
@@ -62,9 +59,6 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
             @Param("endDate") LocalDateTime endDate
     );
 
-    /**
-     * Count active bookings for a vehicle at the current time
-     */
     @Query("SELECT COUNT(b) FROM Booking b WHERE b.vehicle.id = :vehicleId " +
             "AND b.bookingStatus IN :statuses " +
             "AND b.pickupDate <= :currentDate " +
@@ -75,9 +69,6 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
             @Param("currentDate") LocalDateTime currentDate
     );
 
-    /**
-     * Find the next booking date for a vehicle
-     */
     @Query("SELECT MIN(b.pickupDate) FROM Booking b " +
             "WHERE b.vehicle.id = :vehicleId " +
             "AND b.bookingStatus IN :statuses " +
@@ -88,9 +79,6 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
             @Param("currentDate") LocalDateTime currentDate
     );
 
-    /**
-     * Find the next available date after all current bookings
-     */
     @Query("SELECT MAX(b.dropoffDate) FROM Booking b " +
             "WHERE b.vehicle.id = :vehicleId " +
             "AND b.bookingStatus IN :statuses " +
@@ -101,14 +89,8 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
             @Param("currentDate") LocalDateTime currentDate
     );
 
-    /**
-     * Count bookings by owner and status
-     */
     Long countByOwnerIdAndBookingStatus(Long ownerId, Booking.BookingStatus status);
 
-    /**
-     * Sum total amount by owner and statuses
-     */
     @Query("SELECT SUM(b.totalAmount) FROM Booking b " +
             "WHERE b.owner.id = :ownerId " +
             "AND b.bookingStatus IN :statuses")
@@ -117,9 +99,6 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
             @Param("statuses") List<Booking.BookingStatus> statuses
     );
 
-    /**
-     * Get bookings by owner and vehicle with status filter
-     */
     Page<Booking> findByOwnerIdAndVehicleIdAndBookingStatus(
             Long ownerId,
             Long vehicleId,
@@ -127,9 +106,6 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
             Pageable pageable
     );
 
-    /**
-     * Get bookings by owner and vehicle
-     */
     Page<Booking> findByOwnerIdAndVehicleId(
             Long ownerId,
             Long vehicleId,
@@ -137,17 +113,14 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     );
 
     // ═══════════════════════════════════════════════════════════════════════════
-    //  ADMIN METHODS - Only what's needed for the admin panel
+    //  ADMIN METHODS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    // 1. Count by status (for stats cards)
     long countByBookingStatus(Booking.BookingStatus status);
 
-    // 2. Sum revenue by statuses (for total revenue)
     @Query("SELECT SUM(b.totalAmount) FROM Booking b WHERE b.bookingStatus IN :statuses")
     Double sumTotalAmountByBookingStatusIn(@Param("statuses") List<Booking.BookingStatus> statuses);
 
-    // 3. Admin filter queries (with pagination)
     Page<Booking> findByBookingStatusAndPaymentStatus(
             Booking.BookingStatus bookingStatus,
             Booking.PaymentStatus paymentStatus,
@@ -160,4 +133,21 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     Page<Booking> findByPaymentStatus(
             Booking.PaymentStatus paymentStatus,
             Pageable pageable);
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  DROPOFF REMINDER & LATE RETURN METHODS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    @Query("SELECT b FROM Booking b WHERE b.bookingStatus IN ('ACTIVE', 'CONFIRMED') " +
+            "AND b.dropoffDate BETWEEN :startDate AND :endDate " +
+            "AND (b.dropoffReminderSent IS NULL OR b.dropoffReminderSent = false)")
+    List<Booking> findActiveBookingsDueToday(
+            @Param("startDate") LocalDateTime startDate,
+            @Param("endDate") LocalDateTime endDate);
+
+    @Query("SELECT b FROM Booking b WHERE b.bookingStatus IN ('ACTIVE', 'CONFIRMED') " +
+            "AND b.dropoffDate < :gracePeriod " +
+            "AND (b.lateFeeCharged IS NULL OR b.lateFeeCharged = false)")
+    List<Booking> findLateBookings(
+            @Param("gracePeriod") LocalDateTime gracePeriod);
 }

@@ -71,10 +71,15 @@ public class Notification {
         BOOKING_REJECTED,
         BOOKING_CANCELLED,
         BOOKING_COMPLETED,
+        BOOKING_REMINDER,
 
         // Trip Management
         TRIP_ENDED_AWAITING_CONFIRMATION,
         VEHICLE_RETURN_CONFIRMED,
+
+        // Dropoff Reminder & Late Return
+        DROPOFF_REMINDER,
+        LATE_RETURN_WARNING,
 
         PAYMENT_RECEIVED
     }

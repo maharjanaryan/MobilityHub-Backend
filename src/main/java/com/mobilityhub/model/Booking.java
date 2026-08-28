@@ -106,10 +106,6 @@ public class Booking {
     @Column(name = "approved_at")
     private LocalDateTime approvedAt;
 
-    // ─────────────────────────────────────────────
-    // RENTER LOCATION (ONLY LOCATION FIELD)
-    // ─────────────────────────────────────────────
-
     @Column(name = "renter_location")
     private String renterLocation;
 
@@ -125,19 +121,11 @@ public class Booking {
     @Column(name = "driver_license_number")
     private String driverLicenseNumber;
 
-    // ─────────────────────────────────────────────
-    // TRIP MANAGEMENT FIELDS
-    // ─────────────────────────────────────────────
-
     @Column(name = "trip_started_at")
     private LocalDateTime tripStartedAt;
 
     @Column(name = "trip_ended_at")
     private LocalDateTime tripEndedAt;
-
-    // ─────────────────────────────────────────────
-    // VEHICLE RETURN CONFIRMATION FIELDS
-    // ─────────────────────────────────────────────
 
     @Column(name = "vehicle_returned_at")
     private LocalDateTime vehicleReturnedAt;
@@ -156,6 +144,22 @@ public class Booking {
 
     @Column(name = "security_deposit_returned_amount")
     private BigDecimal securityDepositReturnedAmount;
+
+    // ─────────────────────────────────────────────
+    // DROPOFF REMINDER & LATE RETURN FIELDS
+    // ─────────────────────────────────────────────
+
+    @Column(name = "dropoff_reminder_sent")
+    private Boolean dropoffReminderSent;
+
+    @Column(name = "late_fee_charged")
+    private Boolean lateFeeCharged;
+
+    @Column(name = "late_fee_amount", precision = 10, scale = 2)
+    private BigDecimal lateFeeAmount;
+
+    @Column(name = "late_returned_at")
+    private LocalDateTime lateReturnedAt;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)

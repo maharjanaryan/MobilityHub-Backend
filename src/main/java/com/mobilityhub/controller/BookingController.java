@@ -196,7 +196,7 @@ public class BookingController {
     }
 
     // ─────────────────────────────────────────────
-    // CONFIRM VEHICLE RETURN (NEW ENDPOINT)
+    // CONFIRM VEHICLE RETURN
     // ─────────────────────────────────────────────
 
     @PostMapping("/{bookingId}/confirm-return")
@@ -240,6 +240,61 @@ public class BookingController {
     @GetMapping("/vehicle/{vehicleId}/booked-dates")
     public ResponseEntity<List<LocalDateTime>> getBookedDates(@PathVariable Long vehicleId) {
         return ResponseEntity.ok(bookingService.getBookedDatesForVehicle(vehicleId));
+    }
+
+    // ─────────────────────────────────────────────
+    // DROPOFF REMINDER & LATE RETURN ENDPOINTS
+    // ─────────────────────────────────────────────
+
+    @PostMapping("/{bookingId}/send-dropoff-reminder")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<?> sendDropoffReminder(@PathVariable Long bookingId) {
+        try {
+            bookingService.sendDropoffReminder(bookingId);
+            return ResponseEntity.ok().body(Map.of(
+                    "success", true,
+                    "message", "Dropoff reminder sent successfully"
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "success", false,
+                    "message", e.getMessage()
+            ));
+        }
+    }
+
+    @PostMapping("/send-today-reminders")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<?> sendTodayDropoffReminders() {
+        try {
+            bookingService.sendDropoffRemindersForToday();
+            return ResponseEntity.ok().body(Map.of(
+                    "success", true,
+                    "message", "Dropoff reminders sent for all bookings due today"
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "success", false,
+                    "message", e.getMessage()
+            ));
+        }
+    }
+
+    @PostMapping("/check-late-returns")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<?> checkLateReturns() {
+        try {
+            bookingService.checkLateReturns();
+            return ResponseEntity.ok().body(Map.of(
+                    "success", true,
+                    "message", "Late return check completed"
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "success", false,
+                    "message", e.getMessage()
+            ));
+        }
     }
 
     // ─────────────────────────────────────────────

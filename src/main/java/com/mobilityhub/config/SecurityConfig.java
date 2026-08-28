@@ -114,7 +114,9 @@ public class SecurityConfig {
                                         "/api/public/**",
                                         "/api/vehicles/**",                        // public vehicle listing/details
                                         "/api/bookings/vehicle/*/booked-dates",    // calendar display — no auth needed
-                                        "/api/bookings/check-availability"
+                                        "/api/bookings/check-availability",
+                                        "/api/gallery/public/**",    // ← ADD THIS LINE
+                                        "/uploads/**"
                                 ).permitAll()
                                 .anyRequest().authenticated()
                 )

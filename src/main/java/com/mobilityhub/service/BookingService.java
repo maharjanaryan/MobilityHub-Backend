@@ -1,4 +1,3 @@
-// com/mobilityhub/service/BookingService.java
 package com.mobilityhub.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -42,10 +41,13 @@ public class BookingService {
     private final VehicleRepository vehicleRepository;
     private final OwnerKycRepository ownerKycRepository;
     private final NotificationService notificationService;
+    private final EmailService emailService;
     private final ObjectMapper objectMapper;
 
     private static final BigDecimal PREMIUM_INSURANCE_COST = BigDecimal.valueOf(45);
     private static final BigDecimal STANDARD_INSURANCE_COST = BigDecimal.valueOf(22);
+    private static final BigDecimal LATE_FEE_PER_HOUR = BigDecimal.valueOf(50);
+    private static final int GRACE_PERIOD_MINUTES = 30;
 
     private boolean hasVerifiedOwnerKyc(Long userId) {
         return ownerKycRepository.existsByUserIdAndKycStatus(userId, OwnerKyc.KycStatus.VERIFIED);
@@ -81,8 +83,9 @@ public class BookingService {
             throw new RuntimeException("Invalid date format. Please select valid dates.");
         }
 
-        LocalDateTime pickupDate = pickupLocalDate.atStartOfDay();
-        LocalDateTime dropoffDate = dropoffLocalDate.atStartOfDay();
+        // CHANGE: Set pickup and dropoff times to 10:00 AM
+        LocalDateTime pickupDate = pickupLocalDate.atTime(10, 0);
+        LocalDateTime dropoffDate = dropoffLocalDate.atTime(10, 0);
 
         ZoneId nepalZone = ZoneId.of("Asia/Kathmandu");
         LocalDate todayInNepal = LocalDate.now(nepalZone);
@@ -153,6 +156,8 @@ public class BookingService {
                 .renterLocation(request.getRenterLocation())
                 .renterLatitude(request.getRenterLatitude())
                 .renterLongitude(request.getRenterLongitude())
+                .dropoffReminderSent(false)
+                .lateFeeCharged(false)
                 .build();
 
         Booking saved = bookingRepository.save(booking);
@@ -370,14 +375,12 @@ public class BookingService {
             throw new RuntimeException("Only active trips can be ended. Current status: " + booking.getBookingStatus());
         }
 
-        // Set to AWAITING_RETURN_CONFIRMATION instead of COMPLETED
         booking.setBookingStatus(Booking.BookingStatus.AWAITING_RETURN_CONFIRMATION);
         booking.setTripEndedAt(LocalDateTime.now());
         Booking saved = bookingRepository.save(booking);
 
         log.info("🏁 Trip ended for booking {} by user {}, awaiting owner confirmation", bookingId, userId);
 
-        // Notify owner - they need to confirm return
         notificationService.createNotification(
                 booking.getOwner(),
                 "🚗 Trip Ended - Confirm Vehicle Return",
@@ -392,7 +395,6 @@ public class BookingService {
                 booking.getId()
         );
 
-        // Notify renter - waiting for owner confirmation
         notificationService.createNotification(
                 booking.getRenter(),
                 "Trip Ended - Awaiting Owner Confirmation",
@@ -429,34 +431,26 @@ public class BookingService {
             throw new RuntimeException("Cannot confirm return. Booking status is: " + booking.getBookingStatus());
         }
 
-        // Mark as completed
         booking.setBookingStatus(Booking.BookingStatus.COMPLETED);
         booking.setVehicleReturnedAt(LocalDateTime.now());
 
-        // Handle damage report
         Boolean isDamaged = request.getVehicleDamaged() != null && request.getVehicleDamaged();
         booking.setVehicleDamaged(isDamaged);
         booking.setDamageNotes(request.getDamageNotes());
 
-        // Security deposit handling
         if (!isDamaged) {
-            // Full security deposit returned
             booking.setSecurityDepositReturned(true);
             booking.setSecurityDepositReturnedAt(LocalDateTime.now());
             booking.setSecurityDepositReturnedAmount(booking.getSecurityDeposit());
-
             log.info("✅ Security deposit of Rs. {} released for booking {}", booking.getSecurityDeposit(), bookingId);
         } else {
-            // Damaged - deposit not returned (or partial)
             booking.setSecurityDepositReturned(false);
             log.info("⚠️ Security deposit held for booking {} due to damage: {}", bookingId, request.getDamageNotes());
         }
 
         Booking saved = bookingRepository.save(booking);
-
         log.info("✅ Vehicle return confirmed for booking {} by owner {}", bookingId, ownerId);
 
-        // Notify renter
         if (!isDamaged) {
             notificationService.createNotification(
                     booking.getRenter(),
@@ -485,7 +479,6 @@ public class BookingService {
             );
         }
 
-        // Also notify owner that confirmation is complete
         notificationService.createNotification(
                 booking.getOwner(),
                 "✅ Vehicle Return Confirmed",
@@ -499,6 +492,217 @@ public class BookingService {
         );
 
         return mapToResponseDto(saved);
+    }
+
+    // ─────────────────────────────────────────────
+    // DROPOFF REMINDER & LATE RETURN METHODS
+    // ─────────────────────────────────────────────
+
+    @Transactional
+    public void sendDropoffReminder(Long bookingId) {
+        log.info("📧 Sending dropoff reminder for booking: {}", bookingId);
+
+        Booking booking = bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new RuntimeException("Booking not found"));
+
+        if (booking.getBookingStatus() != Booking.BookingStatus.ACTIVE &&
+                booking.getBookingStatus() != Booking.BookingStatus.CONFIRMED) {
+            log.warn("Booking {} is not active/confirmed, skipping reminder", bookingId);
+            return;
+        }
+
+        if (booking.getDropoffReminderSent() != null && booking.getDropoffReminderSent()) {
+            log.info("Dropoff reminder already sent for booking {}", bookingId);
+            return;
+        }
+
+        LocalDate today = LocalDate.now();
+        LocalDate dropoffDate = booking.getDropoffDate().toLocalDate();
+
+        if (!today.equals(dropoffDate)) {
+            log.info("Booking {} dropoff date is {}, not today", bookingId, dropoffDate);
+            return;
+        }
+
+        try {
+            emailService.sendDropoffReminder(
+                    booking.getRenter().getEmail(),
+                    booking.getRenter().getFullName(),
+                    booking.getVehicle().getBrand() + " " + booking.getVehicle().getModel(),
+                    booking.getVehicle().getLicensePlate(),
+                    booking.getPickupDate().toLocalDate().toString(),
+                    booking.getDropoffDate().toLocalDate().toString() +
+                            " at " + booking.getDropoffDate().toLocalTime().toString(),
+                    booking.getOwner().getFullName(),
+                    booking.getOwner().getPhoneNumber(),
+                    booking.getId()
+            );
+            log.info("✅ Dropoff reminder email sent to: {}", booking.getRenter().getEmail());
+        } catch (Exception e) {
+            log.error("❌ Failed to send dropoff reminder email: {}", e.getMessage());
+        }
+
+        try {
+            notificationService.createNotification(
+                    booking.getRenter(),
+                    "🔔 Vehicle Return Reminder - Today is Your Return Day!",
+                    String.format(
+                            "Hello %s,\n\n" +
+                                    "This is a friendly reminder that today is the day to return your rental vehicle.\n\n" +
+                                    "🚗 Vehicle: %s %s (%s)\n" +
+                                    "📅 Return Date: TODAY - %s\n" +
+                                    "⏰ Return Time: %s\n" +
+                                    "👤 Owner: %s\n" +
+                                    "📞 Owner Contact: %s\n\n" +
+                                    "Please return the vehicle to the designated location. " +
+                                    "If you need to extend your rental, please contact the owner directly.\n\n" +
+                                    "Thank you for choosing MobilityHub!\n" +
+                                    "Safe travels! 🚗✨",
+                            booking.getRenter().getFullName(),
+                            booking.getVehicle().getBrand(),
+                            booking.getVehicle().getModel(),
+                            booking.getVehicle().getLicensePlate(),
+                            booking.getDropoffDate().toLocalDate().toString(),
+                            booking.getDropoffDate().toLocalTime().toString(),
+                            booking.getOwner().getFullName(),
+                            booking.getOwner().getPhoneNumber()
+                    ),
+                    Notification.NotificationType.DROPOFF_REMINDER,
+                    booking.getId()
+            );
+            log.info("✅ Dropoff reminder notification sent");
+        } catch (Exception e) {
+            log.error("❌ Failed to send dropoff reminder notification: {}", e.getMessage());
+        }
+
+        booking.setDropoffReminderSent(true);
+        bookingRepository.save(booking);
+    }
+
+    @Transactional
+    public void sendDropoffRemindersForToday() {
+        log.info("🔄 Sending dropoff reminders for all bookings due today");
+
+        LocalDate today = LocalDate.now();
+        LocalDateTime startOfDay = today.atStartOfDay();
+        LocalDateTime endOfDay = today.plusDays(1).atStartOfDay();
+
+        List<Booking> bookingsDueToday = bookingRepository.findActiveBookingsDueToday(
+                startOfDay, endOfDay);
+
+        log.info("Found {} bookings due for dropoff today", bookingsDueToday.size());
+
+        for (Booking booking : bookingsDueToday) {
+            try {
+                sendDropoffReminder(booking.getId());
+            } catch (Exception e) {
+                log.error("Failed to send reminder for booking {}: {}",
+                        booking.getId(), e.getMessage());
+            }
+        }
+    }
+
+    @Transactional
+    public void checkLateReturns() {
+        log.info("🕐 Checking for late returns...");
+
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime gracePeriod = now.minusMinutes(GRACE_PERIOD_MINUTES);
+
+        List<Booking> lateBookings = bookingRepository.findLateBookings(gracePeriod);
+
+        if (lateBookings.isEmpty()) {
+            log.info("No late returns found");
+            return;
+        }
+
+        log.info("Found {} late return(s)", lateBookings.size());
+
+        for (Booking booking : lateBookings) {
+            processLateReturn(booking);
+        }
+    }
+
+    private void processLateReturn(Booking booking) {
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime dropoffDateTime = booking.getDropoffDate();
+
+        // FIXED: Only calculate late fee if the current time is actually after the dropoff time
+        if (now.isBefore(dropoffDateTime)) {
+            log.info("Booking {} dropoff is in the future, skipping late fee calculation", booking.getId());
+            return;
+        }
+
+        long minutesLate = ChronoUnit.MINUTES.between(dropoffDateTime, now);
+        long minutesAfterGrace = minutesLate - GRACE_PERIOD_MINUTES;
+
+        if (minutesAfterGrace <= 0) {
+            return;
+        }
+
+        double hours = Math.ceil(minutesAfterGrace / 60.0);
+        BigDecimal lateFee = BigDecimal.valueOf(50).multiply(BigDecimal.valueOf(hours));
+
+        booking.setLateFeeCharged(true);
+        booking.setLateFeeAmount(lateFee);
+        booking.setLateReturnedAt(now);
+        bookingRepository.save(booking);
+
+        log.info("💰 Late fee of Rs. {} applied to booking {} ({} minutes late)",
+                lateFee, booking.getId(), minutesAfterGrace);
+
+        try {
+            notificationService.createNotification(
+                    booking.getRenter(),
+                    "⚠️ Late Return - Fee Applied",
+                    String.format(
+                            "Hello %s,\n\n⚠️ LATE RETURN DETECTED\n\n" +
+                                    "Vehicle: %s %s (%s)\n" +
+                                    "Original Dropoff: %s\n" +
+                                    "Minutes Late: %d\n" +
+                                    "Late Fee: Rs. %.2f\n\n" +
+                                    "Please return the vehicle as soon as possible.",
+                            booking.getRenter().getFullName(),
+                            booking.getVehicle().getBrand(),
+                            booking.getVehicle().getModel(),
+                            booking.getVehicle().getLicensePlate(),
+                            dropoffDateTime.toLocalTime().toString(),
+                            minutesAfterGrace,
+                            lateFee
+                    ),
+                    Notification.NotificationType.LATE_RETURN_WARNING,
+                    booking.getId()
+            );
+            log.info("✅ Late return notification sent to renter");
+        } catch (Exception e) {
+            log.error("Failed to send late return notification: {}", e.getMessage());
+        }
+
+        try {
+            notificationService.createNotification(
+                    booking.getOwner(),
+                    "⚠️ Late Return Notice",
+                    String.format(
+                            "Renter %s has not returned %s %s (%s) on time.\n\n" +
+                                    "Original Dropoff: %s\n" +
+                                    "Late by: %d minutes\n" +
+                                    "Late Fee: Rs. %.2f\n\n" +
+                                    "Please contact the renter to follow up.",
+                            booking.getRenter().getFullName(),
+                            booking.getVehicle().getBrand(),
+                            booking.getVehicle().getModel(),
+                            booking.getVehicle().getLicensePlate(),
+                            dropoffDateTime.toLocalTime().toString(),
+                            minutesAfterGrace,
+                            lateFee
+                    ),
+                    Notification.NotificationType.LATE_RETURN_WARNING,
+                    booking.getId()
+            );
+            log.info("✅ Late return notification sent to owner");
+        } catch (Exception e) {
+            log.error("Failed to send late return notification to owner: {}", e.getMessage());
+        }
     }
 
     // ─────────────────────────────────────────────
@@ -550,15 +754,16 @@ public class BookingService {
     }
 
     public boolean checkAvailability(Long vehicleId, LocalDateTime pickupDate, LocalDateTime dropoffDate) {
-        LocalDateTime p = pickupDate.toLocalDate().atStartOfDay();
-        LocalDateTime d = dropoffDate.toLocalDate().atStartOfDay();
+        // FIXED: Added .atTime(10, 0) to match the booking times
+        LocalDateTime p = pickupDate.toLocalDate().atTime(10, 0);
+        LocalDateTime d = dropoffDate.toLocalDate().atTime(10, 0);
         return !bookingRepository.isVehicleBooked(vehicleId, p, d);
     }
 
     public List<LocalDateTime> getBookedDatesForVehicle(Long vehicleId) {
         List<Booking> bookings = bookingRepository.findByVehicleIdAndBookingStatusIn(
                 vehicleId,
-                List.of(Booking.BookingStatus.CONFIRMED, Booking.BookingStatus.ACTIVE)
+                List.of(Booking.BookingStatus.CONFIRMED, Booking.BookingStatus.ACTIVE, Booking.BookingStatus.AWAITING_RETURN_CONFIRMATION)
         );
 
         ZoneId nepalZone = ZoneId.of("Asia/Kathmandu");
@@ -569,7 +774,7 @@ public class BookingService {
             LocalDate start = b.getPickupDate().toLocalDate();
             LocalDate end = b.getDropoffDate().toLocalDate();
             LocalDate cur = start.isBefore(today) ? today : start;
-            while (cur.isBefore(end)) {
+            while (cur.isBefore(end) || cur.equals(end)) {
                 bookedDates.add(cur.atStartOfDay());
                 cur = cur.plusDays(1);
             }
@@ -610,10 +815,15 @@ public class BookingService {
                     );
 
                     List<Booking> currentActiveBookings = activeBookings.stream()
-                            .filter(b ->
-                                    b.getPickupDate().isBefore(now) &&
-                                            b.getDropoffDate().isAfter(now)
-                            )
+                            .filter(b -> {
+                                // AWAITING_RETURN_CONFIRMATION is always considered active/current
+                                if (b.getBookingStatus() == Booking.BookingStatus.AWAITING_RETURN_CONFIRMATION) {
+                                    return true;
+                                }
+                                // For CONFIRMED and ACTIVE, check date range
+                                return b.getPickupDate().isBefore(now) &&
+                                        b.getDropoffDate().isAfter(now);
+                            })
                             .collect(Collectors.toList());
 
                     LocalDateTime nextAvailableDate = null;
@@ -685,11 +895,25 @@ public class BookingService {
                             thirtyDaysFromNow
                     );
 
-                    boolean isAvailable = upcomingBookings.isEmpty() ||
-                            upcomingBookings.stream().noneMatch(b ->
-                                    b.getPickupDate().isBefore(now) &&
-                                            b.getDropoffDate().isAfter(now)
-                            );
+                    // Check if vehicle is currently unavailable (including awaiting return)
+                    boolean isAvailable = true;
+                    for (Booking booking : upcomingBookings) {
+                        LocalDateTime pickup = booking.getPickupDate();
+                        LocalDateTime dropoff = booking.getDropoffDate();
+
+                        // If booking is AWAITING_RETURN_CONFIRMATION, vehicle is NOT available
+                        if (booking.getBookingStatus() == Booking.BookingStatus.AWAITING_RETURN_CONFIRMATION) {
+                            isAvailable = false;
+                            break;
+                        }
+
+                        // Check if current time is within booking period
+                        if ((pickup.isBefore(now) || pickup.isEqual(now)) &&
+                                (dropoff.isAfter(now) || dropoff.isEqual(now))) {
+                            isAvailable = false;
+                            break;
+                        }
+                    }
 
                     LocalDateTime nextBookingDate = bookingRepository.findNextBookingDate(
                             vehicle.getId(),
