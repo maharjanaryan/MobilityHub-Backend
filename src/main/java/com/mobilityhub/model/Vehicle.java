@@ -131,6 +131,9 @@ public class Vehicle {
     @Column(name = "total_rentals")
     private Integer totalRentals = 0;
 
+    @Column(name = "total_ratings")
+    private Integer totalRatings = 0;
+
     @Column(name = "average_rating")
     private Double averageRating = 0.0;
 

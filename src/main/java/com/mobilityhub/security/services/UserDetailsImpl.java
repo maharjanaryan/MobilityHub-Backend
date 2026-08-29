@@ -4,6 +4,7 @@ package com.mobilityhub.security.services;
 import com.mobilityhub.model.User;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.security.core.GrantedAuthority;
@@ -15,6 +16,7 @@ import java.util.List;
 import java.util.Objects;
 
 @Data
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class UserDetailsImpl implements UserDetails {
@@ -26,6 +28,7 @@ public class UserDetailsImpl implements UserDetails {
     private String fullName;
     @JsonIgnore
     private String password;
+    private Boolean isActive;  // ADDED: This field stores the user's active status
     private Collection<? extends GrantedAuthority> authorities;
 
     public static UserDetailsImpl build(User user) {
@@ -33,13 +36,30 @@ public class UserDetailsImpl implements UserDetails {
                 new SimpleGrantedAuthority("ROLE_" + user.getRole().name())
         );
 
-        return new UserDetailsImpl(
-                user.getId(),
-                user.getUsername(),
-                user.getEmail(),
-                user.getFullName(),
-                user.getPassword(),
-                authorities);
+        return UserDetailsImpl.builder()
+                .id(user.getId())
+                .username(user.getUsername())
+                .email(user.getEmail())
+                .fullName(user.getFullName())
+                .password(user.getPassword())
+                .isActive(user.isActive())  // ADDED: Pass the active status
+                .authorities(authorities)
+                .build();
+    }
+
+    @Override
+    public Collection<? extends GrantedAuthority> getAuthorities() {
+        return authorities;
+    }
+
+    @Override
+    public String getPassword() {
+        return password;
+    }
+
+    @Override
+    public String getUsername() {
+        return username;
     }
 
     @Override
@@ -59,7 +79,9 @@ public class UserDetailsImpl implements UserDetails {
 
     @Override
     public boolean isEnabled() {
-        return true;
+        // CHANGED: Now returns the user's active status
+        // If isActive is null, treat as false (inactive)
+        return isActive != null && isActive;
     }
 
     @Override
@@ -68,5 +90,10 @@ public class UserDetailsImpl implements UserDetails {
         if (o == null || getClass() != o.getClass()) return false;
         UserDetailsImpl user = (UserDetailsImpl) o;
         return Objects.equals(id, user.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(id);
     }
 }

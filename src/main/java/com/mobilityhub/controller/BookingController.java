@@ -3,11 +3,15 @@ package com.mobilityhub.controller;
 import com.mobilityhub.dto.request.BookingActionRequestDto;
 import com.mobilityhub.dto.request.BookingRequestDto;
 import com.mobilityhub.dto.request.ConfirmReturnRequestDto;
+import com.mobilityhub.dto.request.RatingRequestDto;
 import com.mobilityhub.dto.response.BookingResponseDto;
+import com.mobilityhub.dto.response.RatingResponseDto;
 import com.mobilityhub.dto.response.VehicleAvailabilityStatusDto;
 import com.mobilityhub.dto.response.VehicleBookingStatusDto;
+import com.mobilityhub.dto.response.VehicleRatingSummaryDto;
 import com.mobilityhub.security.services.UserDetailsImpl;
 import com.mobilityhub.service.BookingService;
+import com.mobilityhub.service.RatingService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,6 +35,7 @@ import java.util.Map;
 public class BookingController {
 
     private final BookingService bookingService;
+    private final RatingService ratingService;
 
     // ─────────────────────────────────────────────
     // CREATE BOOKING
@@ -208,6 +213,47 @@ public class BookingController {
         UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
         log.info("User {} confirming vehicle return for booking {}", userDetails.getId(), bookingId);
         return ResponseEntity.ok(bookingService.confirmVehicleReturn(bookingId, userDetails.getId(), request));
+    }
+
+    // ─────────────────────────────────────────────
+    // RATING ENDPOINTS
+    // ─────────────────────────────────────────────
+
+    @PostMapping("/{bookingId}/rate")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<RatingResponseDto> submitRating(
+            @PathVariable Long bookingId,
+            @Valid @RequestBody RatingRequestDto request,
+            Authentication authentication) {
+        UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
+
+        // Set booking ID from path
+        request.setBookingId(bookingId);
+
+        RatingResponseDto response = ratingService.submitRating(userDetails.getId(), request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    @GetMapping("/{bookingId}/rating")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<RatingResponseDto> getRatingByBookingId(
+            @PathVariable Long bookingId,
+            Authentication authentication) {
+        return ResponseEntity.ok(ratingService.getRatingByBookingId(bookingId));
+    }
+
+    @GetMapping("/vehicle/{vehicleId}/ratings")
+    public ResponseEntity<Page<RatingResponseDto>> getVehicleRatings(
+            @PathVariable Long vehicleId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        return ResponseEntity.ok(ratingService.getVehicleRatings(vehicleId, page, size));
+    }
+
+    @GetMapping("/vehicle/{vehicleId}/rating-summary")
+    public ResponseEntity<VehicleRatingSummaryDto> getVehicleRatingSummary(
+            @PathVariable Long vehicleId) {
+        return ResponseEntity.ok(ratingService.getVehicleRatingSummary(vehicleId));
     }
 
     // ─────────────────────────────────────────────

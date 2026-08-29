@@ -75,7 +75,6 @@ public class VehicleRequestDto {
     // Photos
     private List<String> photos;
 
-    // Bluebook Document (required — proof of vehicle ownership)
-    @NotEmpty(message = "Bluebook document is required")
+    // Bluebook Document (required — proof of vehicle ownership
     private List<String> bluebookDocuments;
 }

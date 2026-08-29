@@ -90,6 +90,7 @@ public class VehicleService {
                 .rejectionReason(null)
                 .totalRentals(0)
                 .averageRating(0.0)
+                .totalRatings(0)
                 .viewCount(0)
                 .build();
 
@@ -212,7 +213,7 @@ public class VehicleService {
         notificationService.createNotification(
                 vehicle.getOwner(),
                 "Vehicle Updated",
-                String.format("Your vehicle '%s %s (%s)' has been updated and requires re-verification.",
+                String.format("Your vehicle '%s %s (%s)' has been updated.",
                         vehicle.getBrand(), vehicle.getModel(), vehicle.getLicensePlate()),
                 Notification.NotificationType.VEHICLE_UPDATED,
                 vehicleId
@@ -476,7 +477,7 @@ public class VehicleService {
                 .ownerEmail(ownerEmail)
                 .ownerAvatar(ownerAvatar)
                 .ownerTotalVehicles(ownerTotalVehicles)
-                .ownerRating(0.0) // You can calculate this if needed
+                .ownerRating(0.0)
                 .brand(vehicle.getBrand())
                 .model(vehicle.getModel())
                 .year(vehicle.getYear())
@@ -511,6 +512,7 @@ public class VehicleService {
                 .bluebookDocuments(convertStringToList(vehicle.getBluebookDocument()))
                 .totalRentals(vehicle.getTotalRentals())
                 .averageRating(vehicle.getAverageRating())
+                .totalRatings(vehicle.getTotalRatings())
                 .viewCount(vehicle.getViewCount())
                 .createdAt(vehicle.getCreatedAt())
                 .updatedAt(vehicle.getUpdatedAt())

@@ -69,6 +69,7 @@ public class VehicleResponseDto {
     private Integer totalRentals;
     private Double averageRating;
     private Integer viewCount;
+    private Integer totalRatings;
 
     // Timestamps
     private LocalDateTime createdAt;
